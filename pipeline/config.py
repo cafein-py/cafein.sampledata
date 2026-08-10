@@ -23,6 +23,21 @@ OSM_ATTRIBUTION = "© OpenStreetMap contributors"
 GTFS_LICENSE = "CC BY 4.0"
 GTFS_ATTRIBUTION = "Helsinki Region Transport (HSL)"
 
+# ERROR-severity notice codes the published HSL feed is known to carry.
+# The feed ships as published — these ride along in the validation
+# report instead of blocking; cafein's smoke build remains the
+# functional gate. Any code not listed here still blocks the release.
+TOLERATED_GTFS_NOTICES = frozenset(
+    {
+        # stations (location_type 1) that themselves name a parent_station
+        "station_with_parent_station",
+        # duplicated shape_dist_traveled at different shape points
+        "equal_shape_distance_diff_coordinates",
+        # references to IDs absent from the target file
+        "foreign_key_violation",
+    }
+)
+
 # Sources are hundreds of megabytes; allow slow mirrors before giving up.
 DOWNLOAD_TIMEOUT = 300.0
 

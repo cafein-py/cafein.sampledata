@@ -86,3 +86,10 @@ jobs:
             work/manifest.json \
             work/gtfs-validation-report.json \
             work/LICENSES.txt
+      - name: Preserve the validation report of a rejected feed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtfs-validation-report-failed
+          path: work/gtfs-validation-report.failed.json
+          if-no-files-found: ignore

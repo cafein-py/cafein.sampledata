@@ -210,6 +210,37 @@ def test_validate_raises_on_blocking_notices(tmp_path, fake_transitio):
     assert report_path.exists()
 
 
+def test_tolerated_error_codes_demote_to_warnings():
+    report = {
+        "notices": [
+            {"code": "foreign_key_violation", "severity": "ERROR", "context": {}},
+            {"code": "missing_required_file", "severity": "ERROR", "context": {}},
+        ],
+        "incomplete": [],
+    }
+    blocking, warnings = gtfs.partition(report, config.TOLERATED_GTFS_NOTICES)
+    assert [n["code"] for n in blocking] == ["missing_required_file"]
+    assert [n["code"] for n in warnings] == ["foreign_key_violation"]
+
+
+def test_validate_tolerates_the_known_hsl_notices(tmp_path, fake_transitio):
+    fake_transitio.report = {
+        "notices": [
+            {"code": code, "severity": "ERROR", "context": {}}
+            for code in sorted(config.TOLERATED_GTFS_NOTICES)
+        ],
+        "incomplete": [],
+    }
+    warnings = gtfs.validate(tmp_path / "feed.zip", tmp_path / "report.json")
+    assert {n["code"] for n in warnings} == set(config.TOLERATED_GTFS_NOTICES)
+
+
+def test_incomplete_files_block_even_when_their_code_is_tolerated():
+    report = {"notices": [], "incomplete": ["stop_times.txt"]}
+    blocking, _ = gtfs.partition(report, frozenset({"incomplete_file"}))
+    assert [n["code"] for n in blocking] == ["incomplete_file"]
+
+
 def test_validate_without_transitio_names_the_dependency(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "transitio", None)
     with pytest.raises(PipelineError, match="transitio"):
