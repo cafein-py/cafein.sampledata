@@ -810,6 +810,22 @@ def test_factor_coverage_requires_exactly_the_ferry_gap():
         smoke.check_factor_coverage({0, 4}, set())  # an empty factor table
 
 
+def test_factor_coverage_resolves_extended_route_types():
+    # HSL publishes extended codes: 109 commuter rail, 700-series bus,
+    # 1200-range ferry. They count as their base GTFS modes.
+    covered = {0, 1, 2, 3}
+    base_of = {109: 2, 700: 3, 701: 3, 702: 3, 704: 3, 1200: 4}.get
+    smoke.check_factor_coverage({0, 1, 4, 109, 700, 701}, covered, base_of)
+    # An extended ferry code is still exactly the ferry gap.
+    smoke.check_factor_coverage({0, 1, 109, 702, 704, 1200}, covered, base_of)
+    with pytest.raises(PipelineError, match="carries no route type"):
+        # No rail in any form, classic or extended.
+        smoke.check_factor_coverage({0, 1, 4, 700}, covered, base_of)
+    with pytest.raises(PipelineError, match="expected exactly"):
+        # A code with no base mapping is an uncovered mode, not noise.
+        smoke.check_factor_coverage({0, 1, 4, 109, 700, 1500}, covered, base_of)
+
+
 def test_feed_route_types_reads_the_feed(tmp_path):
     import zipfile
 
