@@ -26,6 +26,7 @@ def stream_download(
     destination,
     timeout=config.DOWNLOAD_TIMEOUT,
     max_bytes=config.MAX_DOWNLOAD_BYTES,
+    headers=None,
 ) -> dict:
     """Download `url` to `destination`, returning what was fetched:
     sha256, byte size, fetch time, and the server's Last-Modified.
@@ -44,7 +45,16 @@ def stream_download(
     try:
         try:
             with os.fdopen(handle, "wb") as sink:
-                with urllib.request.urlopen(url, timeout=timeout) as response:
+                request = urllib.request.Request(url, headers=headers or {})
+                # An authorized request must not follow redirects: urllib
+                # forwards the Authorization header to the new location,
+                # which could hand the credential to another origin.
+                opener = (
+                    urllib.request.build_opener(_RefuseRedirects())
+                    if headers
+                    else urllib.request.build_opener()
+                )
+                with opener.open(request, timeout=timeout) as response:
                     last_modified = response.headers.get("Last-Modified")
                     declared = _declared_length(response)
                     if declared is not None and declared > max_bytes:
@@ -85,6 +95,19 @@ def stream_download(
     }
 
 
+class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    """Fail closed instead of forwarding credentials across origins."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(
+            req.full_url,
+            code,
+            f"refusing to follow a redirect to {newurl} with credentials",
+            headers,
+            fp,
+        )
+
+
 def run_directory(work_dir) -> pathlib.Path:
     """A private (0700) per-run staging directory inside `work_dir`.
 
@@ -99,8 +122,15 @@ def run_directory(work_dir) -> pathlib.Path:
 def staging_path(run_dir, name) -> pathlib.Path:
     """A uniquely named file in the run directory for one asset:
     downloads, validation, and hashing all happen at this path, and only
-    a finished asset is renamed onto its public name."""
-    handle, raw = tempfile.mkstemp(dir=run_dir, prefix=name + ".staging.")
+    a finished asset is renamed onto its public name. The asset's
+    extension is preserved so format-sniffing writers (GPKG, GDAL)
+    recognise the staging file."""
+    stem, dot, extension = name.rpartition(".")
+    handle, raw = tempfile.mkstemp(
+        dir=run_dir,
+        prefix=name + ".staging.",
+        suffix=f".{extension}" if dot else "",
+    )
     os.close(handle)
     return pathlib.Path(raw)
 

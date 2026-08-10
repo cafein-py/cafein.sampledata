@@ -28,4 +28,74 @@ DOWNLOAD_TIMEOUT = 300.0
 
 # The largest source is the Finland extract (~600 MB); anything past
 # this cap is a misbehaving endpoint, aborted before it fills the disk.
+# Smaller endpoints get correspondingly smaller caps at their call
+# sites, so no anomalous-but-successful endpoint can add up to much.
 MAX_DOWNLOAD_BYTES = 4 << 30
+MAX_GTFS_BYTES = 2 << 30
+MAX_DEM_CHUNK_BYTES = 100 << 20
+MAX_WFS_XML_BYTES = 10 << 20
+
+# --- DEM (NLS 10 m elevation model) -----------------------------------------
+
+# The OGC WCS of the National Land Survey's open elevation data. Requires
+# a free NLS api key (https://www.maanmittauslaitos.fi/en/rajapinnat/
+# api-avaimen-ohje), passed by the release workflow as MML_API_KEY.
+NLS_WCS_URL = (
+    "https://avoin-paikkatieto.maanmittauslaitos.fi"
+    "/ortokuvat-ja-korkeusmallit/wcs/v2"
+)
+NLS_DEM_COVERAGE = "korkeusmalli_10m"
+
+# The capital-region bbox in the DEM's native EPSG:3067, the 4326 bbox's
+# corner envelope rounded outward to 100 m (recomputed by the test suite
+# when pyproj is available, so drift fails loudly):
+# (east_min, north_min, east_max, north_max).
+CAPITAL_REGION_BBOX_3067 = (354700, 6647100, 404800, 6699900)
+
+# One WCS GetCoverage per chunk keeps each request far below server
+# response caps: 12.5 km at 10 m is a 1250 px tile, a few MB.
+DEM_CHUNK_METERS = 12500
+
+# The bbox includes open sea, so all-nodata chunks are legitimate; the
+# validity policy is a minimum valid share plus finite elevations at
+# known-land probes (the four municipal centres), which a missing land
+# chunk cannot satisfy.
+DEM_MIN_VALID_FRACTION = 0.35
+# North of the coastal strip the capital region is land: every chunk
+# lying fully north of this northing must carry valid elevations, which
+# catches a single-chunk hole no sparse probe would.
+DEM_LAND_NORTH_OF = 6_660_000
+DEM_MIN_CHUNK_VALID_FRACTION = 0.5
+DEM_LAND_PROBES = (
+    (385700, 6671900),  # central Helsinki
+    (372500, 6677800),  # Leppävaara, Espoo
+    (393200, 6685900),  # Tikkurila, Vantaa
+    (371800, 6672900),  # Kauniainen
+)
+
+DEM_ASSET = "helsinki_dem_10m.tif"
+DEM_LICENSE = "CC BY 4.0"
+DEM_ATTRIBUTION = "National Land Survey of Finland elevation model 10 m"
+
+# --- Population grid (HSY 250 m) --------------------------------------------
+
+# HSY's open geoserver; the population grid is published per year as
+# Vaestotietoruudukko_<year>, discovered from GetCapabilities.
+HSY_WFS_URL = "https://kartta.hsy.fi/geoserver/wfs"
+HSY_GRID_LAYER_PREFIX = "asuminen_ja_maankaytto:Vaestotietoruudukko_"
+# The inhabitants-count field of the grid.
+POPULATION_COLUMN = "asukkaita"
+
+# The grid is ~6000 cells and a few MB: one bounded request fetches it
+# whole (no offset paging, whose order a server need not keep stable),
+# and anything past these ceilings is not the capital-region grid.
+MAX_WFS_FEATURES = 30_000
+MAX_WFS_RESPONSE_BYTES = 60 << 20
+
+# The metropolitan grid has ~6000 populated cells; far fewer means a
+# truncated or wrong layer, not a smaller city.
+MIN_POPULATION_CELLS = 3000
+
+POPULATION_ASSET = "hsy_population_grid_250m.gpkg"
+POPULATION_LICENSE = "CC BY 4.0"
+POPULATION_ATTRIBUTION = "Helsinki Region Environmental Services HSY population grid"

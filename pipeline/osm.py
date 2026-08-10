@@ -91,16 +91,9 @@ def build(work_dir, *, url=None, snapshot_date=None, engine="in_memory") -> dict
                 source_stamp=stamp,
             )
             records = {config.OSM_ASSET: record}
-            # A transaction over a possibly reused directory: invalidate
-            # the previous manifest, install the asset, then write the
-            # manifest describing it. Every crash window leaves either
-            # the intact previous generation or an absent manifest —
-            # never a plausible-but-incoherent pair. A failure before
-            # this point leaves the previous generation untouched.
-            manifest_path = work_dir / "manifest-osm.json"
-            manifest_path.unlink(missing_ok=True)
-            out.replace(work_dir / config.OSM_ASSET)
-            manifest.write_manifest(manifest_path, records)
+            manifest.publish_transaction(
+                work_dir, "manifest-osm.json", records, {config.OSM_ASSET: out}
+            )
         finally:
             # The country extract is ~600 MB and never an output: the
             # run directory goes on success and failure alike, taking
