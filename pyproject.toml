@@ -33,4 +33,4 @@ packages = ["cafein"]
 testpaths = ["tests"]
 
 [tool.black]
-include = '(cafein|tests)/.*\.py$'
+include = '(cafein|pipeline|tests)/.*\.py$'
