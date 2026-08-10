@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import argparse
 import csv
+import datetime
 import io
 import json
 import pathlib
+import re
 import shutil
 import zipfile
 
@@ -82,6 +84,23 @@ def partition(report) -> tuple[list, list]:
     return blocking, warnings
 
 
+def normalize_reference_date(value):
+    """``YYYY-MM-DD`` or ``YYYYMMDD`` -> transitio's ``YYYYMMDD``."""
+    if value is None:
+        return None
+    text = str(value)
+    try:
+        if re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", text):
+            parsed = datetime.date.fromisoformat(text)
+        elif re.fullmatch(r"[0-9]{8}", text):
+            parsed = datetime.datetime.strptime(text, "%Y%m%d").date()
+        else:
+            raise ValueError(text)
+    except ValueError as error:
+        raise PipelineError(f"invalid reference date: {text!r}") from error
+    return parsed.strftime("%Y%m%d")
+
+
 def validate(feed_path, report_path, reference_date=None) -> list:
     """Gate the feed; writes the full report, raises on blocking notices,
     returns the warnings."""
@@ -107,6 +126,7 @@ def validate(feed_path, report_path, reference_date=None) -> list:
 
 def build(work_dir, *, url=config.HSL_GTFS_URL, reference_date=None) -> dict:
     """Run the step; returns ``{asset name: manifest record}``."""
+    reference_date = normalize_reference_date(reference_date)
     work_dir = pathlib.Path(work_dir)
     with workdir_lock(work_dir):
         # Everything happens inside a private 0700 run directory —
@@ -170,6 +190,8 @@ def build(work_dir, *, url=config.HSL_GTFS_URL, reference_date=None) -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("work_dir", help="directory for downloads and outputs")
-    parser.add_argument("--reference-date", help="YYYYMMDD for service checks")
+    parser.add_argument(
+        "--reference-date", help="YYYY-MM-DD (or YYYYMMDD) for service checks"
+    )
     arguments = parser.parse_args()
     print(build(arguments.work_dir, reference_date=arguments.reference_date))
