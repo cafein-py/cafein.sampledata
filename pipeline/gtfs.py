@@ -91,8 +91,10 @@ def normalize_reference_date(value):
     try:
         if "-" in text:
             parsed = datetime.date.fromisoformat(text)
-        else:
+        elif len(text) == 8 and text.isdigit():
             parsed = datetime.datetime.strptime(text, "%Y%m%d").date()
+        else:
+            raise ValueError(text)
     except ValueError as error:
         raise PipelineError(f"invalid reference date: {text!r}") from error
     return parsed.strftime("%Y%m%d")
