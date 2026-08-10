@@ -1,0 +1,88 @@
+name: data-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Data release tag, e.g. helsinki-2026.08"
+        required: true
+      snapshot_date:
+        description: "Geofabrik snapshot date, YYMMDD (immutable source)"
+        required: true
+      reference_date:
+        description: "Service date for validation/smoke, YYYY-MM-DD"
+        required: true
+
+permissions:
+  contents: write
+
+# Inputs reach the shell only as quoted env vars, never interpolated
+# into command text.
+env:
+  RELEASE_TAG: ${{ inputs.release_tag }}
+  SNAPSHOT_DATE: ${{ inputs.snapshot_date }}
+  REFERENCE_DATE: ${{ inputs.reference_date }}
+
+jobs:
+  produce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Validate the inputs
+        run: |
+          [[ "$RELEASE_TAG" =~ ^helsinki-[0-9]{4}\.[0-9]{2}$ ]] \
+            || { echo "malformed release_tag"; exit 1; }
+          [[ "$SNAPSHOT_DATE" =~ ^[0-9]{6}$ ]] \
+            || { echo "malformed snapshot_date"; exit 1; }
+          [[ "$REFERENCE_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] \
+            || { echo "malformed reference_date"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: pipeline/environment.yaml
+          cache-environment: true
+      - name: Refresh cafein
+        # The cached environment can hold an old cafein; the factor
+        # byte-equality check must run against the newest release.
+        shell: bash -el {0}
+        run: python -m pip install -U cafein
+      - name: OSM step
+        shell: bash -el {0}
+        run: python -m pipeline.osm work --snapshot-date "$SNAPSHOT_DATE"
+      - name: GTFS step
+        shell: bash -el {0}
+        run: python -m pipeline.gtfs work --reference-date "$REFERENCE_DATE"
+      - name: DEM step
+        shell: bash -el {0}
+        env:
+          MML_API_KEY: ${{ secrets.MML_API_KEY }}
+        run: python -m pipeline.dem work
+      - name: Population step
+        shell: bash -el {0}
+        run: python -m pipeline.population work
+      - name: Smoke build (cafein consumes every asset)
+        shell: bash -el {0}
+        run: python -m pipeline.smoke work "$REFERENCE_DATE"
+      - name: Assemble the release artifacts
+        shell: bash -el {0}
+        run: python -m pipeline.release work "$RELEASE_TAG"
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # --target pins the new tag to this run's commit rather than
+        # the default branch's current tip.
+        run: |
+          gh release create "$RELEASE_TAG" \
+            --draft \
+            --target "$GITHUB_SHA" \
+            --title "$RELEASE_TAG" \
+            --notes-file work/RELEASE_NOTES.md \
+            work/helsinki_capital_region.osm.pbf \
+            work/hsl_gtfs.zip \
+            work/helsinki_dem_10m.tif \
+            work/hsy_population_grid_250m.gpkg \
+            work/manifest.json \
+            work/gtfs-validation-report.json \
+            work/LICENSES.txt

@@ -12,6 +12,8 @@ dependencies:
   - rioxarray
   - pytest
   - pip
+  # Builds the pinned transitio (a Rust core) from its repository:
+  - rust
   # transitio (the GTFS validation gate) is not on PyPI yet; the release
   # workflow installs it from its repository, pinned to a reviewed
   # commit so an upstream change can never silently alter the gate —
