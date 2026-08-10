@@ -47,12 +47,13 @@ def feed_info(path) -> dict:
     return {}
 
 
-def partition(report) -> tuple[list, list]:
+def partition(report, tolerated=frozenset()) -> tuple[list, list]:
     """Split a transitio validation report into (blocking, warnings).
 
-    Blocking: every ERROR notice, plus a synthesized notice per file the
-    validator could not read in full — a truncated read means the rest
-    of the report cannot vouch for the feed.
+    Blocking: every ERROR notice whose code is not in `tolerated`, plus
+    a synthesized notice per file the validator could not read in full —
+    a truncated read means the rest of the report cannot vouch for the
+    feed, so incomplete files block regardless of `tolerated`.
     """
     notices = report.get("notices")
     incomplete = report.get("incomplete")
@@ -65,7 +66,10 @@ def partition(report) -> tuple[list, list]:
     for notice in notices:
         severity = notice.get("severity") if isinstance(notice, dict) else None
         if severity == "ERROR":
-            blocking.append(notice)
+            if notice.get("code") in tolerated:
+                warnings.append(notice)
+            else:
+                blocking.append(notice)
         elif severity == "WARNING":
             warnings.append(notice)
         elif severity != "INFO":
@@ -114,7 +118,7 @@ def validate(feed_path, report_path, reference_date=None) -> list:
     manifest.atomic_write_text(
         report_path, json.dumps(report, indent=2, ensure_ascii=False) + "\n"
     )
-    blocking, warnings = partition(report)
+    blocking, warnings = partition(report, config.TOLERATED_GTFS_NOTICES)
     if blocking:
         codes = sorted({notice.get("code", "?") for notice in blocking})
         raise PipelineError(
