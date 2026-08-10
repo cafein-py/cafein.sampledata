@@ -1,0 +1,19 @@
+# The conda environment the release pipeline runs in. Repo-only — the
+# published package itself is stdlib-only; these are the data-production
+# dependencies the step modules import lazily.
+name: cafein-sampledata-pipeline
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - pyrosm>=0.13
+  - geopandas
+  - pytest
+  - pip
+  # transitio (the GTFS validation gate) is not on PyPI yet; the release
+  # workflow installs it from its repository, pinned to a reviewed
+  # commit so an upstream change can never silently alter the gate —
+  # update the pin deliberately. It carries a Rust core, so the workflow
+  # needs a Rust toolchain (or a prebuilt wheel) for this:
+  - pip:
+      - git+https://github.com/cafein-py/transitio@f3c5a006df8570e6ccd8b440005f263b5c998b19  # 0.10.0
