@@ -12,7 +12,7 @@ import argparse
 import pathlib
 import re
 
-from pipeline import PipelineError, manifest, smoke
+from pipeline import PipelineError, config, manifest, smoke
 
 TAG_PATTERN = re.compile(r"^helsinki-\d{4}\.\d{2}$")
 
@@ -20,6 +20,20 @@ TAG_PATTERN = re.compile(r"^helsinki-\d{4}\.\d{2}$")
 LICENSE_URLS = {
     "ODbL 1.0": "https://opendatacommons.org/licenses/odbl/1-0/",
     "CC BY 4.0": "https://creativecommons.org/licenses/by/4.0/",
+}
+
+#: CC BY / ODbL require stating whether the source data was changed.
+MODIFICATIONS = {
+    config.OSM_ASSET: (
+        "clipped to the capital region from the Geofabrik Finland extract"
+    ),
+    config.GTFS_ASSET: "none — the feed is shipped as HSL published it",
+    config.DEM_ASSET: (
+        "mosaicked from WCS tiles and clipped to the capital region"
+    ),
+    config.POPULATION_ASSET: (
+        "clipped to the capital-region extent and written to GeoPackage"
+    ),
 }
 
 
@@ -55,6 +69,9 @@ def render_licenses(records) -> str:
             f"  attribution: {record['attribution']}",
             f"  source:      {record['source_stamp']}",
         ]
+        modified = MODIFICATIONS.get(name)
+        if modified:
+            lines.append(f"  modified:    {modified}")
         url = LICENSE_URLS.get(record["license"])
         if url:
             lines.append(f"  license text: {url}")
