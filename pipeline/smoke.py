@@ -4,8 +4,9 @@ Runs after the steps, before a release is cut. Verifies every step
 manifest still describes the bytes on disk, then drives the assets
 through cafein itself: the transit network builds from the feed and the
 extract (DEM included), the street network routes, and the population
-grid reads and routes as polygon origins. The emission-factors check
-joins when the factors asset lands (PR 4).
+grid reads and routes as polygon origins, and the bundled emission
+factors byte-equal a fresh export with exactly the defaults' coverage
+over the feed.
 """
 
 from __future__ import annotations
@@ -89,6 +90,89 @@ def snapshot_assets(work_dir, records, snapshot_dir) -> dict:
     return paths
 
 
+FEED_ROUTES_LIMIT = 8 << 20  # routes.txt is small; cap the read
+
+
+def feed_route_types(gtfs_path) -> set:
+    """The route_type codes the feed's routes.txt declares."""
+    import csv
+    import io
+    import zipfile
+
+    with zipfile.ZipFile(gtfs_path) as archive:
+        try:
+            entry = archive.getinfo("routes.txt")
+        except KeyError:
+            raise PipelineError("the feed has no routes.txt") from None
+        if entry.file_size > FEED_ROUTES_LIMIT:
+            raise PipelineError("routes.txt is implausibly large")
+        with archive.open(entry) as member:
+            raw = member.read(FEED_ROUTES_LIMIT)
+    types = set()
+    for row in csv.DictReader(io.StringIO(raw.decode("utf-8-sig"))):
+        value = (row.get("route_type") or "").strip()
+        if value:
+            types.add(int(value))
+    return types
+
+
+def check_factor_coverage(route_types, covered) -> None:
+    """The bundled defaults' covered route types — read from the table
+    itself, not hard-coded — must all appear in the feed, and the only
+    uncovered mode must be the Suomenlinna ferry (4). A missing covered
+    mode or any other uncovered mode fails the release rather than
+    silently shifting the contract."""
+    route_types = set(route_types)
+    if not covered:
+        raise PipelineError("the loaded factor table covers no route types")
+    missing = set(covered) - route_types
+    if missing:
+        raise PipelineError(
+            f"the feed carries no route type(s) {sorted(missing)} — a "
+            f"covered mode disappeared from the HSL feed"
+        )
+    uncovered = route_types - set(covered)
+    if uncovered != {4}:
+        raise PipelineError(
+            f"the feed's uncovered route types are {sorted(uncovered)}, "
+            f"expected exactly [4] (the ferry) — the factor coverage "
+            f"contract changed"
+        )
+
+
+def check_bundled_factors(gtfs_path, snapshot_dir) -> pathlib.Path:
+    """The bundled CSVs byte-equal a fresh export from the installed
+    cafein, and their coverage over the feed — read through the
+    production loader — is exactly the defaults'. Returns a private
+    snapshot copy of the loader-ready file, so later annotation
+    consumes exactly the validated bytes."""
+    from cafein import emissions
+
+    from pipeline import factors
+
+    # One read per file: the buffer that passed the comparison is the
+    # buffer the snapshot gets, so nothing can swap the bytes between
+    # validation and consumption.
+    validated = {}
+    for path, render in (
+        (factors.BUNDLED_PATH, factors.render_csv),
+        (factors.BUNDLED_FULL_PATH, factors.render_full_csv),
+    ):
+        data = path.read_bytes()
+        if data != render().encode("utf-8"):
+            raise PipelineError(
+                f"{path.name} does not byte-equal a fresh export from the "
+                f"installed cafein — regenerate with pipeline/factors.py"
+            )
+        validated[path.name] = data
+    snapshot = pathlib.Path(snapshot_dir) / factors.BUNDLED_PATH.name
+    snapshot.write_bytes(validated[factors.BUNDLED_PATH.name])
+    loaded = emissions.load_factors(str(snapshot))
+    covered = set(loaded["route_type"].dropna().astype(int))
+    check_factor_coverage(feed_route_types(gtfs_path), covered)
+    return snapshot
+
+
 def run(work_dir, date) -> dict:
     """The full smoke: manifest verification, cafein builds, one query
     per surface — under the work-directory lock, and consuming private
@@ -119,6 +203,11 @@ def _run_locked(work_dir, snapshot_dir, date) -> dict:
     dem = assets[config.DEM_ASSET]
     grid_path = assets[config.POPULATION_ASSET]
 
+    # The bundled factors: byte-identity with the installed cafein and
+    # the exact expected coverage over this very feed, snapshotted for
+    # the annotation below.
+    factors_snapshot = check_bundled_factors(gtfs, snapshot_dir)
+
     # Transit: full build — footpaths, multimodal graph, elevations.
     network = TransportNetwork.from_gtfs(
         [str(gtfs)],
@@ -129,20 +218,57 @@ def _run_locked(work_dir, snapshot_dir, date) -> dict:
     stops = [stop for stop, lat, lon in network.stops if lat is not None]
     if len(stops) < 2:
         raise PipelineError("the built network has fewer than two located stops")
-    # An arbitrary first stop may simply have no service on the date;
-    # the feed is proven routable when any of a handful of origins
-    # reaches a *different* stop in finite time.
+    # The bundled factors applied for real: search across origins until
+    # some journey rides a *non-ferry* transit leg (an origin's whole
+    # neighbourhood may be walkable or ferry-served, so one origin's
+    # reachability set proves nothing) and require grams on those legs,
+    # annotated from the validated snapshot.
+    ferry_routes = {
+        route_id
+        for route_id, agency_id, route_type in network.routes
+        if route_type == 4
+    }
+    saw_service = False
+    ridden = None
     for origin in stops[:25]:
         times = network.travel_times_from_stop(origin, date, "08:30:00")
-        if any(
-            stop != origin and 0 < seconds < 86_400 and math.isfinite(seconds)
+        candidates = [
+            stop
             for stop, seconds in times.items()
-        ):
+            if stop != origin and 0 < seconds < 86_400 and math.isfinite(seconds)
+        ]
+        saw_service = saw_service or bool(candidates)
+        for destination in candidates[:20]:
+            journeys = network.route_between_stops(
+                origin, destination, date, "08:30:00"
+            )
+            annotated = network.annotate_emissions(
+                journeys, factors=str(factors_snapshot)
+            )
+            legs = [
+                leg
+                for journey in annotated
+                for leg in journey["legs"]
+                if leg["type"] == "transit" and leg.get("route_id") not in ferry_routes
+            ]
+            if legs:
+                ridden = legs
+                break
+        if ridden is not None:
             break
-    else:
+    if not saw_service:
         raise PipelineError(
             f"none of {min(25, len(stops))} sampled stops reaches another "
             f"stop on {date} — the feed has no usable service that day"
+        )
+    if ridden is None:
+        raise PipelineError(
+            f"no sampled journey rides a non-ferry transit leg on {date}"
+        )
+    if any(leg.get("emissions") is None for leg in ridden):
+        raise PipelineError(
+            "a non-ferry transit leg resolved no emissions through the "
+            "bundled factors"
         )
 
     # Streets: standalone build with elevations, one slope-aware ride.

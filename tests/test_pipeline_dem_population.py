@@ -784,3 +784,30 @@ def test_mosaic_refuses_a_subpixel_shifted_grid(tmp_path):
             bbox=(355000, 6650000, 355500, 6650500),
             probes=[],
         )
+
+
+def test_factor_coverage_requires_exactly_the_ferry_gap():
+    covered = {0, 1, 2, 3}
+    smoke.check_factor_coverage({0, 1, 2, 3, 4}, covered)  # the expected shape
+    with pytest.raises(PipelineError, match="carries no route type"):
+        smoke.check_factor_coverage({0, 3, 4}, covered)  # tram, metro gone
+    with pytest.raises(PipelineError, match="carries no route type"):
+        smoke.check_factor_coverage({4}, covered)  # everything else gone
+    with pytest.raises(PipelineError, match="expected exactly"):
+        smoke.check_factor_coverage({0, 1, 2, 3}, covered)  # no ferry: drift
+    with pytest.raises(PipelineError, match="expected exactly"):
+        smoke.check_factor_coverage({0, 1, 2, 3, 4, 7}, covered)  # funicular
+    with pytest.raises(PipelineError, match="covers no route types"):
+        smoke.check_factor_coverage({0, 4}, set())  # an empty factor table
+
+
+def test_feed_route_types_reads_the_feed(tmp_path):
+    import zipfile
+
+    path = tmp_path / "feed.zip"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            "routes.txt",
+            "route_id,route_type\na,0\nb,3\nc,4\n",
+        )
+    assert smoke.feed_route_types(path) == {0, 3, 4}
