@@ -69,6 +69,21 @@ def write_manifest(path, assets: dict) -> dict:
     return payload
 
 
+def publish_transaction(work_dir, manifest_name, records, files) -> dict:
+    """The two-phase publish every step ends with: invalidate the
+    previous step manifest, rename each staged file onto its public
+    name, then write the manifest describing them last — every crash
+    window leaves either the intact previous generation or an absent
+    manifest, never a plausible-but-incoherent pair. `files` maps
+    public names to staged paths."""
+    work_dir = pathlib.Path(work_dir)
+    manifest_path = work_dir / manifest_name
+    manifest_path.unlink(missing_ok=True)
+    for name, staged in files.items():
+        pathlib.Path(staged).replace(work_dir / name)
+    return write_manifest(manifest_path, records)
+
+
 def read_manifest(path) -> dict:
     payload = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
     if payload.get("schema") != SCHEMA:

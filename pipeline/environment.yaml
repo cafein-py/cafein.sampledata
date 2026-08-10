@@ -8,6 +8,8 @@ dependencies:
   - python>=3.10
   - pyrosm>=0.13
   - geopandas
+  - rasterio
+  - rioxarray
   - pytest
   - pip
   # transitio (the GTFS validation gate) is not on PyPI yet; the release
@@ -17,3 +19,5 @@ dependencies:
   # needs a Rust toolchain (or a prebuilt wheel) for this:
   - pip:
       - git+https://github.com/cafein-py/transitio@f3c5a006df8570e6ccd8b440005f263b5c998b19  # 0.10.0
+      # The smoke build consumes the assets through cafein itself:
+      - cafein>=0.10

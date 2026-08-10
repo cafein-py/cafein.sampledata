@@ -117,7 +117,9 @@ def build(work_dir, *, url=config.HSL_GTFS_URL, reference_date=None) -> dict:
         staging = download.staging_path(run_dir, config.GTFS_ASSET)
         report_staging = run_dir / "gtfs-validation-report.json"
         try:
-            fetched = download.stream_download(url, staging)
+            fetched = download.stream_download(
+                url, staging, max_bytes=config.MAX_GTFS_BYTES
+            )
             try:
                 validate(staging, report_staging, reference_date)
             except PipelineError as error:
@@ -149,17 +151,15 @@ def build(work_dir, *, url=config.HSL_GTFS_URL, reference_date=None) -> dict:
                     f"validated bytes were not the pinned bytes"
                 )
             records = {config.GTFS_ASSET: record}
-            # A transaction over a possibly reused directory: invalidate
-            # the previous manifest, install the asset, then write the
-            # manifest describing it. Every crash window leaves either
-            # the intact previous generation or an absent manifest —
-            # never a plausible-but-incoherent pair. A failure before
-            # this point leaves the previous generation untouched.
-            manifest_path = work_dir / "manifest-gtfs.json"
-            manifest_path.unlink(missing_ok=True)
-            staging.replace(work_dir / config.GTFS_ASSET)
-            report_staging.replace(work_dir / "gtfs-validation-report.json")
-            manifest.write_manifest(manifest_path, records)
+            manifest.publish_transaction(
+                work_dir,
+                "manifest-gtfs.json",
+                records,
+                {
+                    config.GTFS_ASSET: staging,
+                    "gtfs-validation-report.json": report_staging,
+                },
+            )
         finally:
             # A feed is 150-250 MB; a failed run must not leave one
             # behind — the run directory and any staging in it go.
