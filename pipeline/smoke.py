@@ -116,22 +116,40 @@ def feed_route_types(gtfs_path) -> set:
     return types
 
 
-def check_factor_coverage(route_types, covered) -> None:
+def check_factor_coverage(route_types, covered, base_of=None) -> None:
     """The bundled defaults' covered route types — read from the table
     itself, not hard-coded — must all appear in the feed, and the only
     uncovered mode must be the Suomenlinna ferry (4). A missing covered
     mode or any other uncovered mode fails the release rather than
-    silently shifting the contract."""
+    silently shifting the contract.
+
+    `base_of` maps an extended route_type code to its base GTFS mode
+    (or None) the same way cafein's factor resolver does: HSL publishes
+    e.g. 109 (commuter rail) and 700-series (bus), which count as their
+    covered base modes here because that is how the factors match them.
+    """
     route_types = set(route_types)
     if not covered:
         raise PipelineError("the loaded factor table covers no route types")
-    missing = set(covered) - route_types
+    covered = set(covered)
+
+    def mode_of(route_type):
+        if route_type in covered:
+            return route_type
+        base = base_of(route_type) if base_of is not None else None
+        return base if base in covered else None
+
+    missing = covered - {mode_of(t) for t in route_types}
     if missing:
         raise PipelineError(
             f"the feed carries no route type(s) {sorted(missing)} — a "
             f"covered mode disappeared from the HSL feed"
         )
-    uncovered = route_types - set(covered)
+    uncovered = set()
+    for route_type in route_types:
+        if mode_of(route_type) is None:
+            base = base_of(route_type) if base_of is not None else None
+            uncovered.add(route_type if base is None else base)
     if uncovered != {4}:
         raise PipelineError(
             f"the feed's uncovered route types are {sorted(uncovered)}, "
@@ -169,7 +187,11 @@ def check_bundled_factors(gtfs_path, snapshot_dir) -> pathlib.Path:
     snapshot.write_bytes(validated[factors.BUNDLED_PATH.name])
     loaded = emissions.load_factors(str(snapshot))
     covered = set(loaded["route_type"].dropna().astype(int))
-    check_factor_coverage(feed_route_types(gtfs_path), covered)
+    # The resolver's own extended->base mapping; a cafein rename fails
+    # loudly here rather than silently changing the coverage contract.
+    check_factor_coverage(
+        feed_route_types(gtfs_path), covered, emissions._base_route_type
+    )
     return snapshot
 
 
