@@ -29,7 +29,8 @@ MODIFICATIONS = {
     ),
     config.GTFS_ASSET: "none — the feed is shipped as HSL published it",
     config.DEM_ASSET: (
-        "mosaicked from WCS tiles and clipped to the capital region"
+        "resampled to 10 m from the 2 m model, mosaicked from WCS tiles, "
+        "and clipped to the capital region"
     ),
     config.POPULATION_ASSET: (
         "clipped to the capital-region extent and written to GeoPackage"

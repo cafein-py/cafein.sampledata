@@ -56,10 +56,12 @@ MAX_WFS_XML_BYTES = 10 << 20
 # a free NLS api key (https://www.maanmittauslaitos.fi/en/rajapinnat/
 # api-avaimen-ohje), passed by the release workflow as MML_API_KEY.
 NLS_WCS_URL = (
-    "https://avoin-paikkatieto.maanmittauslaitos.fi"
-    "/ortokuvat-ja-korkeusmallit/wcs/v2"
+    "https://avoin-karttakuva.maanmittauslaitos.fi" "/ortokuvat-ja-korkeusmallit/wcs/v2"
 )
-NLS_DEM_COVERAGE = "korkeusmalli_10m"
+# The WCS serves only the 2 m elevation model; the 10 m asset is the
+# server's own resampling of it (SCALEFACTOR 0.2 -> 10 m pixels).
+NLS_DEM_COVERAGE = "korkeusmalli_2m"
+NLS_DEM_SCALEFACTOR = 0.2
 
 # The capital-region bbox in the DEM's native EPSG:3067, the 4326 bbox's
 # corner envelope rounded outward to 100 m (recomputed by the test suite
@@ -67,9 +69,9 @@ NLS_DEM_COVERAGE = "korkeusmalli_10m"
 # (east_min, north_min, east_max, north_max).
 CAPITAL_REGION_BBOX_3067 = (354700, 6647100, 404800, 6699900)
 
-# One WCS GetCoverage per chunk keeps each request far below server
-# response caps: 12.5 km at 10 m is a 1250 px tile, a few MB.
-DEM_CHUNK_METERS = 12500
+# One WCS GetCoverage per chunk; the server caps elevation requests at
+# 10 x 10 km, and 10 km at 10 m is a 1000 px tile, a few MB.
+DEM_CHUNK_METERS = 10000
 
 # The bbox includes open sea, so all-nodata chunks are legitimate; the
 # validity policy is a minimum valid share plus finite elevations at
@@ -90,7 +92,7 @@ DEM_LAND_PROBES = (
 
 DEM_ASSET = "helsinki_dem_10m.tif"
 DEM_LICENSE = "CC BY 4.0"
-DEM_ATTRIBUTION = "National Land Survey of Finland elevation model 10 m"
+DEM_ATTRIBUTION = "National Land Survey of Finland elevation model 2 m"
 
 # --- Population grid (HSY 250 m) --------------------------------------------
 

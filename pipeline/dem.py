@@ -1,8 +1,9 @@
-"""The DEM step: the NLS 10 m elevation model over the capital region.
+"""The DEM step: NLS elevation at 10 m over the capital region.
 
 Fetched from the National Land Survey's open WCS in bbox chunks (each
-request far below server caps), mosaicked, and written as a
-cloud-optimised GeoTIFF in the native EPSG:3067.
+request within the server's 10 km cap), server-resampled from the 2 m
+model to 10 m pixels, mosaicked, and written as a cloud-optimised
+GeoTIFF in the native EPSG:3067.
 """
 
 from __future__ import annotations
@@ -47,6 +48,7 @@ def coverage_url(chunk_bbox) -> str:
         f"{config.NLS_WCS_URL}?service=WCS&version=2.0.1&request=GetCoverage"
         f"&CoverageID={config.NLS_DEM_COVERAGE}&format=image/tiff"
         f"&SUBSET=E({east_min},{east_max})&SUBSET=N({north_min},{north_max})"
+        f"&SCALEFACTOR={config.NLS_DEM_SCALEFACTOR}"
     )
 
 

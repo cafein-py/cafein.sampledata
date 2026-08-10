@@ -40,6 +40,15 @@ def test_coverage_url_carries_the_subsets_and_no_credential():
     assert "SUBSET=N(6650000,6655000)" in url
     assert "api-key" not in url  # the key travels as a header, never a URL
     assert url.startswith(config.NLS_WCS_URL)
+    # The 10 m asset is the server's resampling of the 2 m coverage.
+    assert "CoverageID=korkeusmalli_2m" in url
+    assert "SCALEFACTOR=0.2" in url
+
+
+def test_the_chunks_respect_the_server_area_cap():
+    # The NLS WCS refuses elevation requests beyond 10 x 10 km.
+    for e0, n0, e1, n1 in dem.chunk_ranges():
+        assert e1 - e0 <= 10000 and n1 - n0 <= 10000
 
 
 def test_the_api_key_becomes_a_basic_auth_header():
@@ -211,7 +220,7 @@ def test_fetch_chunks_requires_a_stable_double_pass(tmp_path, monkeypatch):
 
     monkeypatch.setattr(dem.download, "stream_download", changing_download)
     with pytest.raises(PipelineError, match="different bytes across"):
-        dem.fetch_chunks(tmp_path, "KEY", bbox=(0, 0, 12500, 12500))
+        dem.fetch_chunks(tmp_path, "KEY", bbox=(0, 0, 10000, 10000))
 
 
 def test_fetch_chunks_accepts_a_stable_service(tmp_path, monkeypatch):
@@ -224,7 +233,7 @@ def test_fetch_chunks_accepts_a_stable_service(tmp_path, monkeypatch):
         return {"sha256": _hashlib.sha256(payload).hexdigest(), "size": len(payload)}
 
     monkeypatch.setattr(dem.download, "stream_download", stable_download)
-    chunks = dem.fetch_chunks(tmp_path, "KEY", bbox=(0, 0, 12500, 12500))
+    chunks = dem.fetch_chunks(tmp_path, "KEY", bbox=(0, 0, 10000, 10000))
     assert len(chunks) == 1
     assert chunks[0][0].read_bytes() == b"one stable generation"
 
