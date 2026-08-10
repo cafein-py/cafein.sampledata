@@ -119,6 +119,7 @@ def mosaic_to_cog(
             "the DEM step needs rasterio (see pipeline/environment.yaml)"
         ) from error
     import rasterio.windows
+
     east_min, north_min, east_max, north_max = bbox
     sources = [
         (rasterio.open(os.fspath(path)), requested) for path, requested in chunks
