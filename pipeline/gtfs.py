@@ -13,6 +13,7 @@ import datetime
 import io
 import json
 import pathlib
+import re
 import shutil
 import zipfile
 
@@ -89,9 +90,9 @@ def normalize_reference_date(value):
         return None
     text = str(value)
     try:
-        if "-" in text:
+        if re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", text):
             parsed = datetime.date.fromisoformat(text)
-        elif len(text) == 8 and text.isdigit():
+        elif re.fullmatch(r"[0-9]{8}", text):
             parsed = datetime.datetime.strptime(text, "%Y%m%d").date()
         else:
             raise ValueError(text)

@@ -169,7 +169,17 @@ def test_the_reference_date_normalizes_to_the_gtfs_form():
     assert gtfs.normalize_reference_date(None) is None
 
 
-@pytest.mark.parametrize("bad", ["2026-13-01", "11-08-2026", "notadate", "260811"])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "2026-13-01",
+        "11-08-2026",
+        "notadate",
+        "260811",
+        "2026-W33-2",
+        "\u0662\u0660\u0662\u0666\u0660\u0668\u0661\u0661",
+    ],
+)
 def test_a_malformed_reference_date_is_refused(bad):
     with pytest.raises(PipelineError, match="invalid reference date"):
         gtfs.normalize_reference_date(bad)
