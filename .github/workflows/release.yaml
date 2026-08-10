@@ -1,0 +1,110 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: |
+          python -m pip install build
+          python -m build
+      - name: Test suite
+        run: |
+          python -m pip install pytest dist/*.whl
+          python -m pytest -q
+      - name: Test the built wheel's layout
+        # A neutral directory, so the checkout's cafein/ portion cannot
+        # shadow the installed wheel.
+        working-directory: ${{ runner.temp }}
+        run: |
+          python - <<'PY'
+          import cafein.sampledata.helsinki as helsinki
+          assert "site-packages" in helsinki.__file__, helsinki.__file__
+          assert helsinki.emission_factors.exists()
+          assert helsinki.emission_factors_full.exists()
+          print("wheel carries the bundled assets")
+          PY
+      - name: Require tag / version / registry correspondence
+        working-directory: ${{ runner.temp }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -m pip install -q packaging
+          RELEASE="$(python -c 'from cafein.sampledata.helsinki import _registry; print(_registry.RELEASE)')"
+          test "$(gh release view "$RELEASE" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = "false" \
+            || { echo "data release $RELEASE is not published"; exit 1; }
+          gh release download "$RELEASE" --repo "$GITHUB_REPOSITORY" --pattern manifest.json --dir .
+          python - <<'PY'
+          import os, re
+          import importlib.metadata
+          from cafein.sampledata.helsinki import _registry
+
+          from packaging.version import Version
+
+          tag = os.environ["GITHUB_REF_NAME"]
+          match = re.fullmatch(r"v(\d{4})\.(\d{1,2})\.\d+", tag)
+          assert match, f"tag {tag!r} is not vYYYY.MM.PATCH"
+          version = importlib.metadata.version("cafein.sampledata")
+          # PEP 440 normalizes 2026.08.0 to 2026.8.0; compare parsed.
+          assert Version(tag[1:]) == Version(version), (
+              f"tag {tag!r} != version {version!r}"
+          )
+          expected = f"helsinki-{match.group(1)}.{int(match.group(2)):02d}"
+          assert _registry.RELEASE == expected, (
+              f"registry pins {_registry.RELEASE!r}, tag implies {expected!r}"
+          )
+          # The pins must be exactly the published data release's
+          # manifest: same asset set, same fields, exact URLs.
+          import json
+
+          manifest = json.load(open("manifest.json"))
+          registry_names = {a.name for a in _registry.ASSETS.values()}
+          assert registry_names == set(manifest["assets"]), (
+              f"registry names {sorted(registry_names)} != manifest "
+              f"{sorted(manifest['assets'])}"
+          )
+          for key, asset in _registry.ASSETS.items():
+              record = manifest["assets"][asset.name]
+              for field in (
+                  "sha256", "size", "license", "attribution", "source_stamp"
+              ):
+                  assert getattr(asset, field) == record[field], (
+                      f"{key}: stale {field}"
+                  )
+              expected_url = (
+                  f"{_registry.DOWNLOAD_BASE}/{_registry.RELEASE}/{asset.name}"
+              )
+              assert asset.url == expected_url, f"{key}: stale URL {asset.url}"
+          print("publishing", version, "pinning", _registry.RELEASE)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      # release/v1, pinned by commit
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33
