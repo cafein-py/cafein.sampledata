@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cafein.sampledata"
+version = "0.0.1.dev0"
+description = "Sample datasets for cafein, downloaded on first access"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "Henrikki Tenkanen" }]
+keywords = ["cafein", "sample data", "GTFS", "OpenStreetMap", "Helsinki"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: GIS",
+]
+
+[project.urls]
+Repository = "https://github.com/cafein-py/cafein.sampledata"
+"Issue Tracker" = "https://github.com/cafein-py/cafein.sampledata/issues"
+
+[tool.hatch.build.targets.wheel]
+# The wheel ships the cafein/sampledata/ subtree only; cafein/__init__.py
+# belongs to the cafein wheel, so the two never collide in site-packages.
+packages = ["cafein"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.black]
+include = '(cafein|tests)/.*\.py$'
