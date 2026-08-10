@@ -17,7 +17,7 @@ from pipeline import PipelineError, config, download, manifest, workdir_lock
 
 
 def clip_capital_region(
-    source, out, bbox=config.CAPITAL_REGION_BBOX, engine="in_memory"
+    source, out, bbox=config.CAPITAL_REGION_BBOX, engine="in_memory", workers="auto"
 ):
     """Clip `source` to `bbox` and write a valid PBF at `out`."""
     west, south, east, north = bbox
@@ -31,7 +31,9 @@ def clip_capital_region(
             "the OSM step needs pyrosm >= 0.13 and geopandas "
             "(conda-forge; see the pipeline environment)"
         ) from error
-    reader = OSM(os.fspath(source), bounding_box=list(bbox), engine=engine)
+    reader = OSM(
+        os.fspath(source), bounding_box=list(bbox), engine=engine, workers=workers
+    )
     # Zero edits: an empty frame updates nothing, so the whole cached
     # (bbox-filtered) dataset is written through unchanged.
     no_edits = geopandas.GeoDataFrame(columns=["id", "osm_type", "geometry"])
