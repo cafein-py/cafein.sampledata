@@ -163,6 +163,18 @@ def fake_transitio(monkeypatch):
     return module
 
 
+def test_the_reference_date_normalizes_to_the_gtfs_form():
+    assert gtfs.normalize_reference_date("2026-08-11") == "20260811"
+    assert gtfs.normalize_reference_date("20260811") == "20260811"
+    assert gtfs.normalize_reference_date(None) is None
+
+
+@pytest.mark.parametrize("bad", ["2026-13-01", "11-08-2026", "notadate", "260811"])
+def test_a_malformed_reference_date_is_refused(bad):
+    with pytest.raises(PipelineError, match="invalid reference date"):
+        gtfs.normalize_reference_date(bad)
+
+
 def test_validate_writes_the_report_and_passes_clean(tmp_path, fake_transitio):
     fake_transitio.report = {
         "notices": [{"code": "fast_travel", "severity": "WARNING", "context": {}}],
