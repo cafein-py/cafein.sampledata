@@ -90,6 +90,14 @@ def snapshot_assets(work_dir, records, snapshot_dir) -> dict:
     return paths
 
 
+def sample_stops(stops, count=25):
+    """An even spread across the stop list. Stop ids sort stations
+    first in HSL feeds (an unserved-terminal block leads the id order),
+    so probing the head of the list would sample no served stop."""
+    step = max(1, len(stops) // count)
+    return stops[::step][:count]
+
+
 FEED_ROUTES_LIMIT = 8 << 20  # routes.txt is small; cap the read
 
 
@@ -250,9 +258,10 @@ def _run_locked(work_dir, snapshot_dir, date) -> dict:
         for route_id, agency_id, route_type in network.routes
         if route_type == 4
     }
+    sampled = sample_stops(stops)
     saw_service = False
     ridden = None
-    for origin in stops[:25]:
+    for origin in sampled:
         times = network.travel_times_from_stop(origin, date, "08:30:00")
         candidates = [
             stop
@@ -280,7 +289,7 @@ def _run_locked(work_dir, snapshot_dir, date) -> dict:
             break
     if not saw_service:
         raise PipelineError(
-            f"none of {min(25, len(stops))} sampled stops reaches another "
+            f"none of {len(sampled)} sampled stops reaches another "
             f"stop on {date} — the feed has no usable service that day"
         )
     if ridden is None:

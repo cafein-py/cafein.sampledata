@@ -826,6 +826,17 @@ def test_factor_coverage_resolves_extended_route_types():
         smoke.check_factor_coverage({0, 1, 4, 109, 700, 1500}, covered, base_of)
 
 
+def test_stop_sampling_spreads_across_the_list():
+    stops = [f"stop-{index:05d}" for index in range(8305)]
+    sampled = smoke.sample_stops(stops)
+    assert len(sampled) == 25
+    # The head of an id-sorted HSL stop list is an unserved-terminal
+    # block; a real spread must reach far past it.
+    assert sampled[0] == "stop-00000"
+    assert sampled[-1] >= "stop-07000"
+    assert smoke.sample_stops(["a", "b"]) == ["a", "b"]
+
+
 def test_feed_route_types_reads_the_feed(tmp_path):
     import zipfile
 
