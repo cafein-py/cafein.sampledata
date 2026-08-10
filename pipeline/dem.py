@@ -108,6 +108,8 @@ def mosaic_to_cog(
 ):
     """Mosaic the chunk rasters and write a COG at `out`, validating
     that the result really is the 10 m EPSG:3067 model over `bbox`."""
+    if not chunks:
+        raise PipelineError("no DEM chunks to mosaic")
     try:
         import numpy
         import rasterio
@@ -117,9 +119,6 @@ def mosaic_to_cog(
             "the DEM step needs rasterio (see pipeline/environment.yaml)"
         ) from error
     import rasterio.windows
-
-    if not chunks:
-        raise PipelineError("no DEM chunks to mosaic")
     east_min, north_min, east_max, north_max = bbox
     sources = [
         (rasterio.open(os.fspath(path)), requested) for path, requested in chunks
