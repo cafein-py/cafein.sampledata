@@ -20,7 +20,9 @@ def workdir_lock(work_dir):
     """One build per working directory: the public asset names and the
     step manifest are only coherent when a single run writes them, so a
     second concurrent build is refused rather than interleaved."""
-    lock = pathlib.Path(work_dir) / ".pipeline-lock"
+    work_dir = pathlib.Path(work_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    lock = work_dir / ".pipeline-lock"
     try:
         handle = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:

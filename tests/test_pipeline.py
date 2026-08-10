@@ -365,6 +365,16 @@ def test_a_successful_osm_build_removes_the_country_source(
     assert names == [config.OSM_ASSET, "manifest-osm.json"]
 
 
+def test_the_work_directory_is_created_on_demand(tmp_path):
+    from pipeline import workdir_lock
+
+    work = tmp_path / "not" / "yet" / "created"
+    with workdir_lock(work):
+        assert work.is_dir()
+        assert (work / ".pipeline-lock").exists()
+    assert not (work / ".pipeline-lock").exists()
+
+
 def test_a_second_build_in_the_same_work_dir_is_refused(server, tmp_path):
     _, url = server
     (tmp_path / ".pipeline-lock").touch()  # another run holds the directory
