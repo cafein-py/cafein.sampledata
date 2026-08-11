@@ -10,6 +10,7 @@ and cutting the package release that carries it.
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
 import re
 
@@ -39,13 +40,14 @@ RELEASE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
-def _literal(value, field, filename) -> str:
+def _literal(value, field=None, filename=None) -> str:
     """A manifest string as a safe Python literal — the registry is
-    executable code, so every interpolated value goes through repr and
-    never through bare string formatting."""
+    executable code, so every interpolated value is escaped and never
+    bare-formatted. JSON string syntax is a subset of Python's and
+    double-quoted, so the generated file is black-clean as written."""
     if not isinstance(value, str):
         raise PipelineError(f"{filename}: manifest field {field!r} is not a string")
-    return repr(value)
+    return json.dumps(value, ensure_ascii=False)
 
 
 def render_block(release, assets) -> str:
@@ -53,7 +55,7 @@ def render_block(release, assets) -> str:
     records keyed by filename."""
     if not isinstance(release, str) or not RELEASE_PATTERN.fullmatch(release):
         raise PipelineError(f"malformed release tag {release!r}")
-    lines = [BEGIN, f"RELEASE = {release!r}", "", "ASSETS = {"]
+    lines = [BEGIN, f"RELEASE = {_literal(release)}", "", "ASSETS = {"]
     for attribute, filename in ATTRIBUTES.items():
         if filename not in assets:
             raise PipelineError(
@@ -78,9 +80,9 @@ def render_block(release, assets) -> str:
         url_line = '        url=f"{DOWNLOAD_BASE}/' + f'{release}/{filename}",'
         lines += [
             f'    "{attribute}": Asset(',
-            f"        name={filename!r},",
+            f"        name={_literal(filename)},",
             url_line,
-            f"        sha256={sha256!r},",
+            f"        sha256={_literal(sha256)},",
             f"        size={size},",
             f"        license={_literal(record.get('license'), 'license', filename)},",
             f"        attribution="
@@ -100,7 +102,7 @@ def regenerate(manifest_path, release, registry_path=REGISTRY_PATH) -> str:
     registry_path = pathlib.Path(registry_path)
     text = registry_path.read_text(encoding="utf-8")
     # Markers match as exact whole lines only: values inside the block
-    # are repr-rendered (single-line), so an attribution merely
+    # are escaped single-line literals, so an attribution merely
     # *containing* the marker text can never confuse the splice.
     lines = text.split("\n")
     begins = [index for index, line in enumerate(lines) if line == BEGIN]

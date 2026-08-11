@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cafein.sampledata"
-version = "0.0.1.dev0"
+version = "2026.8.0"
 description = "Sample datasets for cafein, downloaded on first access"
 readme = "README.md"
 license = { text = "MIT" }
