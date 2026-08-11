@@ -224,6 +224,17 @@ def test_regenerate_rewrites_the_pins(tmp_path):
     assert registry_copy.read_text(encoding="utf-8") == before
 
 
+def test_generated_literals_are_double_quoted():
+    # The registry is committed source: the generator must emit
+    # black-clean (double-quoted) literals, repr's single quotes fail
+    # the lint gate.
+    assert registry._literal("plain") == '"plain"'
+    assert registry._literal("© OSM") == '"© OSM"'
+    assert registry._literal('with "quotes"') == '"with \\"quotes\\""'
+    with pytest.raises(PipelineError, match="not a string"):
+        registry._literal(7, "license", "file")
+
+
 def test_regenerate_refuses_a_partial_manifest(tmp_path):
     manifest.write_manifest(
         tmp_path / "manifest.json",
