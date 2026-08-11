@@ -115,9 +115,57 @@ def fetch_features(layer, run_dir) -> pathlib.Path:
     return page_path
 
 
+def nearest_cell_distance(cells, grid):
+    """For every cell of `cells`, the distance to the nearest *other*
+    cell of `grid`, in the grid's own units."""
+    nearest = cells.geometry.to_frame("geometry").sjoin_nearest(
+        grid.geometry.to_frame("geometry"),
+        how="left",
+        distance_col="distance",
+        exclusive=True,
+    )
+    # A tie hands back one row per equidistant neighbour; the distance
+    # they all share is the one being measured.
+    return nearest.groupby(level=0)["distance"].min().reindex(cells.index)
+
+
+def drop_dummy_cell(grid):
+    """Drop HSY's unknown-location dummy cell — institutional residents
+    and residents who cannot be linked to a building, aggregated into
+    one cell out in the Gulf of Finland.
+
+    The cell is found by its documented signature (the no-data sentinel,
+    standing alone at sea), never by row position, and exactly one cell
+    must carry it: a grid where the signature matches none or several
+    is one whose format moved under us, and dropping by position there
+    would quietly delete real residents.
+    """
+    column = config.POPULATION_NODATA_COLUMN
+    if column not in grid.columns:
+        raise PipelineError(
+            f"the grid has no {column!r} column (columns: "
+            f"{sorted(grid.columns)}) — the HSY schema changed?"
+        )
+    isolation = config.POPULATION_DUMMY_ISOLATION_METERS
+    candidates = grid.loc[grid[column] == config.POPULATION_NODATA_SENTINEL]
+    # Real cells carry the sentinel too (44 of them in the 2025 grid),
+    # so the sentinel alone would drop inhabited land; the dummy is the
+    # sentinel cell with no neighbour for kilometres.
+    matched = candidates.index[nearest_cell_distance(candidates, grid) >= isolation]
+    if len(matched) != 1:
+        raise PipelineError(
+            f"{len(matched)} cells carry the unknown-location dummy "
+            f"signature ({column} == {config.POPULATION_NODATA_SENTINEL} "
+            f"and no other cell within {isolation} m), expected exactly "
+            f"one — the HSY grid changed; check the layer before publishing"
+        )
+    return grid.drop(matched)
+
+
 def write_grid(geojson_path, out, year=None):
-    """Read the fetched features, clip to the capital-region extent,
-    and write the GeoPackage (the source year as layer metadata)."""
+    """Read the fetched features, drop the dummy cell, clip to the
+    capital-region extent, and write the GeoPackage (the source year as
+    layer metadata)."""
     try:
         import geopandas
     except ImportError as error:
@@ -144,6 +192,11 @@ def write_grid(geojson_path, out, year=None):
             "the grid carries null or empty geometries — refusing to "
             "publish a silently incomplete grid"
         )
+    # Before the clip: the dummy cell is a property of the published
+    # layer, and its signature is only unambiguous against the whole of
+    # it — an extent that happened to exclude it would turn the missing
+    # signature into a spurious failure.
+    grid = drop_dummy_cell(grid)
     # The published layer can extend past the shared extent; keep the
     # cells whose centroid falls inside it (the explicit edge rule), so
     # every asset covers one and the same region.
@@ -209,7 +262,10 @@ def build(work_dir) -> dict:
             features = fetch_features(layer, run_dir)
             out = download.staging_path(run_dir, config.POPULATION_ASSET)
             write_grid(features, out, year=year)
-            stamp = f"HSY {layer} fetched {_utcnow()}"
+            stamp = (
+                f"HSY {layer} fetched {_utcnow()}, "
+                "unknown-location dummy cell removed"
+            )
             record = manifest.asset_record(
                 out,
                 name=config.POPULATION_ASSET,

@@ -38,6 +38,8 @@ def test_assemble_writes_the_release_artifacts(tmp_path):
     assert f"stamp of {config.OSM_ASSET}" in licenses
     assert "mosaicked from WCS tiles" in licenses
     assert "shipped as HSL published it" in licenses
+    # CC BY: the dropped dummy cell is a stated modification.
+    assert "unknown-location" in licenses
     notes = (work / "RELEASE_NOTES.md").read_text()
     assert notes.startswith("# helsinki-2026.08")
     assert config.GTFS_ASSET in notes
@@ -51,8 +53,27 @@ def test_assemble_reverifies_the_assets(tmp_path):
     assert not (work / "manifest.json").exists()
 
 
+def test_assemble_accepts_a_within_month_serial(tmp_path):
+    # A corrected release inside the same month; the published month
+    # tag is immutable, so the fix is a new tag beside it.
+    work = _produced_work_dir(tmp_path)
+    release.assemble(work, "helsinki-2026.08.1")
+    assert (work / "RELEASE_NOTES.md").read_text().startswith("# helsinki-2026.08.1")
+
+
 @pytest.mark.parametrize(
-    "tag", ["2026.08", "helsinki-26.8", "helsinki-2026.8", "oslo-2026.08", "../x"]
+    "tag",
+    [
+        "2026.08",
+        "helsinki-26.8",
+        "helsinki-2026.8",
+        "oslo-2026.08",
+        "../x",
+        "helsinki-2026.08.",
+        "helsinki-2026.08.x",
+        "helsinki-2026.08.1.2",
+        "helsinki-2026.08.١",  # a Unicode decimal is not an ASCII serial
+    ],
 )
 def test_assemble_refuses_a_malformed_tag(tmp_path, tag):
     work = _produced_work_dir(tmp_path)

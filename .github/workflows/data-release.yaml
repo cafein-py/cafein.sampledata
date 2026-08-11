@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Data release tag, e.g. helsinki-2026.08"
+        description: "Data release tag, e.g. helsinki-2026.08 or helsinki-2026.08.1"
         required: true
       snapshot_date:
         description: "Geofabrik snapshot date, YYMMDD (immutable source)"
@@ -30,7 +30,7 @@ jobs:
     steps:
       - name: Validate the inputs
         run: |
-          [[ "$RELEASE_TAG" =~ ^helsinki-[0-9]{4}\.[0-9]{2}$ ]] \
+          [[ "$RELEASE_TAG" =~ ^helsinki-[0-9]{4}\.[0-9]{2}(\.[0-9]+)?$ ]] \
             || { echo "malformed release_tag"; exit 1; }
           [[ "$SNAPSHOT_DATE" =~ ^[0-9]{6}$ ]] \
             || { echo "malformed snapshot_date"; exit 1; }

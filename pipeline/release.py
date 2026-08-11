@@ -14,7 +14,12 @@ import re
 
 from pipeline import PipelineError, config, manifest, smoke
 
-TAG_PATTERN = re.compile(r"^helsinki-\d{4}\.\d{2}$")
+# helsinki-YYYY.MM, plus an optional serial for a corrected release
+# within the same month (helsinki-2026.08.1). A published data release
+# is immutable — a fix to the data is a new tag, never a moved one.
+# Digits are ASCII-only: `\d` would also admit Unicode decimals the
+# workflow's own check rejects.
+TAG_PATTERN = re.compile(r"^helsinki-[0-9]{4}\.[0-9]{2}(\.[0-9]+)?$")
 
 #: Canonical license texts, referenced from the notice document.
 LICENSE_URLS = {
@@ -33,7 +38,10 @@ MODIFICATIONS = {
         "and clipped to the capital region"
     ),
     config.POPULATION_ASSET: (
-        "clipped to the capital-region extent and written to GeoPackage"
+        "clipped to the capital-region extent, HSY's unknown-location "
+        "dummy cell (institutional residents and residents not linked to "
+        "a building, aggregated into one cell in the Gulf of Finland) "
+        "dropped, and written to GeoPackage"
     ),
 }
 
@@ -42,7 +50,8 @@ def assemble(work_dir, tag) -> dict:
     """Write the release artifacts; returns the merged records."""
     if not TAG_PATTERN.fullmatch(tag):
         raise PipelineError(
-            f"malformed data release tag {tag!r}: expected helsinki-YYYY.MM"
+            f"malformed data release tag {tag!r}: expected "
+            f"helsinki-YYYY.MM or helsinki-YYYY.MM.N"
         )
     work_dir = pathlib.Path(work_dir)
     records = smoke.verify_manifests(work_dir)

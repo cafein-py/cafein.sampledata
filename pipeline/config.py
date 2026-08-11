@@ -103,6 +103,19 @@ HSY_GRID_LAYER_PREFIX = "asuminen_ja_maankaytto:Vaestotietoruudukko_"
 # The inhabitants-count field of the grid.
 POPULATION_COLUMN = "asukkaita"
 
+# HSY aggregates institutional residents and residents who cannot be
+# linked to a building into one dummy cell placed in the Gulf of Finland
+# at the map's lower-right corner. It is no place anyone lives, so the
+# step drops it, identified by its documented signature: the no-data
+# sentinel in the floor-area-per-resident field, in a cell standing
+# alone out at sea.
+POPULATION_NODATA_COLUMN = "asvaljyys"
+POPULATION_NODATA_SENTINEL = 999999999
+# The sentinel alone is not the signature — 44 real cells of the 2025
+# grid carry it too. Isolation separates them: the most remote real cell
+# lies 1.5 km from its nearest neighbour, the dummy cell 14 km.
+POPULATION_DUMMY_ISOLATION_METERS = 5000
+
 # The grid is ~6000 cells and a few MB: one bounded request fetches it
 # whole (no offset paging, whose order a server need not keep stable),
 # and anything past these ceilings is not the capital-region grid.
