@@ -38,6 +38,8 @@ def test_assemble_writes_the_release_artifacts(tmp_path):
     assert f"stamp of {config.OSM_ASSET}" in licenses
     assert "mosaicked from WCS tiles" in licenses
     assert "shipped as HSL published it" in licenses
+    # CC BY: the dropped dummy cell is a stated modification.
+    assert "unknown-location" in licenses
     notes = (work / "RELEASE_NOTES.md").read_text()
     assert notes.startswith("# helsinki-2026.08")
     assert config.GTFS_ASSET in notes

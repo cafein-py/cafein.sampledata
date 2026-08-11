@@ -291,11 +291,16 @@ def test_missing_grid_layer_is_an_error():
         population.latest_grid_layer("<WFS_Capabilities/>")
 
 
-def _grid_geojson(path, *, column="asukkaita", east=380000, north=6670000, value=42):
-    cell = {
+#: Where HSY parks its unknown-location cell: the Gulf of Finland,
+#: south-east of everywhere anyone lives.
+DUMMY_EAST, DUMMY_NORTH = 402750, 6658700
+
+
+def _cell(east, north, properties):
+    return {
         "type": "Feature",
         "id": f"grid.{east}.{north}",
-        "properties": {column: value, "index": 1},
+        "properties": properties,
         "geometry": {
             "type": "Polygon",
             "coordinates": [
@@ -309,7 +314,27 @@ def _grid_geojson(path, *, column="asukkaita", east=380000, north=6670000, value
             ],
         },
     }
-    path.write_text(json.dumps({"type": "FeatureCollection", "features": [cell]}))
+
+
+def _grid_geojson(
+    path, *, column="asukkaita", east=380000, north=6670000, value=42, dummy=True
+):
+    """One inhabited cell and, unless `dummy` is off, the offshore
+    unknown-location cell every published grid carries."""
+    features = [_cell(east, north, {column: value, "index": 1, "asvaljyys": 38.0})]
+    if dummy:
+        features.append(
+            _cell(
+                DUMMY_EAST,
+                DUMMY_NORTH,
+                {
+                    column: 33575,
+                    "index": 2,
+                    "asvaljyys": config.POPULATION_NODATA_SENTINEL,
+                },
+            )
+        )
+    path.write_text(json.dumps({"type": "FeatureCollection", "features": features}))
     return path
 
 
@@ -345,7 +370,9 @@ def test_write_grid_clips_to_the_region_and_refuses_emptiness(tmp_path, monkeypa
     # Inside + outside cells: the outside one is clipped away.
     inside = _json.loads(_grid_geojson(tmp_path / "a.json").read_text())
     outside = _json.loads(
-        _grid_geojson(tmp_path / "b.json", east=500000, north=7300000).read_text()
+        _grid_geojson(
+            tmp_path / "b.json", east=500000, north=7300000, dummy=False
+        ).read_text()
     )
     both = tmp_path / "both.json"
     both.write_text(
@@ -365,11 +392,86 @@ def test_write_grid_clips_to_the_region_and_refuses_emptiness(tmp_path, monkeypa
         population.write_grid(source, tmp_path / "off.gpkg")
 
 
+def _with_features(path, source, features):
+    """A copy of the `source` grid with `features` appended."""
+    payload = json.loads(source.read_text())
+    payload["features"] = payload["features"] + features
+    path.write_text(json.dumps(payload))
+    return path
+
+
+def test_write_grid_drops_the_offshore_dummy_cell_only(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "MIN_POPULATION_CELLS", 1)
+    geopandas = pytest.importorskip("geopandas")
+
+    # An inhabited neighbour carrying the same no-data sentinel: real
+    # cells do (44 of them in the 2025 grid), and only the offshore one
+    # may go.
+    source = _with_features(
+        tmp_path / "grid.json",
+        _grid_geojson(tmp_path / "base.json"),
+        [
+            _cell(
+                380250,
+                6670000,
+                {
+                    "asukkaita": 7,
+                    "index": 3,
+                    "asvaljyys": config.POPULATION_NODATA_SENTINEL,
+                },
+            )
+        ],
+    )
+    out = tmp_path / "grid.gpkg"
+    population.write_grid(source, out)
+    grid = geopandas.read_file(out, layer="population_grid")
+    assert sorted(grid[config.POPULATION_COLUMN]) == [7, 42]
+
+
+def test_write_grid_refuses_a_grid_with_no_dummy_cell(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "MIN_POPULATION_CELLS", 1)
+    pytest.importorskip("geopandas")
+    source = _grid_geojson(tmp_path / "grid.json", dummy=False)
+    with pytest.raises(PipelineError, match="0 cells carry"):
+        population.write_grid(source, tmp_path / "grid.gpkg")
+
+
+def test_write_grid_refuses_two_dummy_cells(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "MIN_POPULATION_CELLS", 1)
+    pytest.importorskip("geopandas")
+    source = _with_features(
+        tmp_path / "grid.json",
+        _grid_geojson(tmp_path / "base.json"),
+        [
+            _cell(
+                DUMMY_EAST,
+                DUMMY_NORTH - 20000,
+                {
+                    "asukkaita": 5,
+                    "index": 4,
+                    "asvaljyys": config.POPULATION_NODATA_SENTINEL,
+                },
+            )
+        ],
+    )
+    with pytest.raises(PipelineError, match="2 cells carry"):
+        population.write_grid(source, tmp_path / "grid.gpkg")
+
+
+def test_write_grid_refuses_a_missing_nodata_column(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "MIN_POPULATION_CELLS", 1)
+    pytest.importorskip("geopandas")
+    monkeypatch.setattr(config, "POPULATION_NODATA_COLUMN", "asvaljyys_renamed")
+    source = _grid_geojson(tmp_path / "grid.json")
+    with pytest.raises(PipelineError, match="schema changed"):
+        population.write_grid(source, tmp_path / "grid.gpkg")
+
+
 class _WfsHandler(http.server.BaseHTTPRequestHandler):
     """A fake HSY WFS: capabilities, a hits count, and paged features."""
 
     grid_body = None
-    hits = 1
+    hits = 2  # the inhabited cell and the dummy cell
 
     def do_GET(self):  # noqa: N802 - stdlib handler naming
         if "GetCapabilities" in self.path:
@@ -411,6 +513,7 @@ def test_population_build_end_to_end(tmp_path, monkeypatch):
         httpd.shutdown()
     record = records[config.POPULATION_ASSET]
     assert "Vaestotietoruudukko_2024" in record["source_stamp"]
+    assert "dummy cell removed" in record["source_stamp"]
     assert "2024" in record["attribution"]
     names = sorted(p.name for p in work.iterdir())
     assert names == [config.POPULATION_ASSET, "manifest-population.json"]
@@ -423,7 +526,7 @@ def test_population_build_refuses_a_partial_grid(tmp_path, monkeypatch):
     handler = type(
         "Handler",
         (_WfsHandler,),
-        {"grid_body": grid_json.read_bytes(), "hits": 5},  # declares 5, sends 1
+        {"grid_body": grid_json.read_bytes(), "hits": 5},  # declares 5, sends 2
     )
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -455,7 +558,7 @@ def test_population_build_refuses_duplicate_features(tmp_path, monkeypatch):
         )
     )
     handler = type(
-        "Handler", (_WfsHandler,), {"grid_body": doubled.read_bytes(), "hits": 2}
+        "Handler", (_WfsHandler,), {"grid_body": doubled.read_bytes(), "hits": 4}
     )
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()

@@ -33,7 +33,10 @@ MODIFICATIONS = {
         "and clipped to the capital region"
     ),
     config.POPULATION_ASSET: (
-        "clipped to the capital-region extent and written to GeoPackage"
+        "clipped to the capital-region extent, HSY's unknown-location "
+        "dummy cell (institutional residents and residents not linked to "
+        "a building, aggregated into one cell in the Gulf of Finland) "
+        "dropped, and written to GeoPackage"
     ),
 }
 
