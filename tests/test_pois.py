@@ -314,45 +314,6 @@ def test_build_publishes_every_category(tmp_path, monkeypatch, two_categories):
     assert smoke.verify_manifests(work, names={"manifest-pois.json": tuple(records)})
 
 
-def test_build_without_an_extract_says_so(tmp_path, two_categories):
-    work = tmp_path / "work"
-    work.mkdir()
-    with pytest.raises(PipelineError, match="run the OSM step before"):
-        pois.build(work)
-
-
-def test_build_without_the_osm_manifest_says_so(tmp_path, two_categories):
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / config.OSM_ASSET).write_bytes(EXTRACT_BYTES)
-    with pytest.raises(PipelineError, match="run the OSM step before"):
-        pois.build(work)
-
-
-def test_build_refuses_an_extract_that_lost_its_provenance(
-    tmp_path, monkeypatch, two_categories
-):
-    work = _produced_extract(tmp_path)
-    # The published extract and the manifest that measured it disagree.
-    (work / config.OSM_ASSET).write_bytes(b"some other extract")
-    with pytest.raises(PipelineError, match="does not match manifest-osm.json"):
-        pois.build(work)
-
-
-def test_build_refuses_an_extract_that_is_a_symlink(tmp_path, two_categories):
-    """A symlinked extract is refused rather than copied as a link —
-    the private copy must be bytes, not a pointer at bytes somebody
-    else can still change."""
-    work = _produced_extract(tmp_path)
-    elsewhere = tmp_path / "elsewhere.osm.pbf"
-    elsewhere.write_bytes(EXTRACT_BYTES)
-    extract = work / config.OSM_ASSET
-    extract.unlink()
-    extract.symlink_to(elsewhere)
-    with pytest.raises(PipelineError, match="cannot read the OSM extract"):
-        pois.build(work)
-
-
 def _fake_pyrosm(monkeypatch, reader_class, frame):
     """Install a stub pyrosm; returns the paths its reader was given."""
     import sys
@@ -376,6 +337,55 @@ class _PathReader(_Reader):
     def __init__(self, frame, path):
         super().__init__(frame)
         self.path = pathlib.Path(path)
+
+
+# The checks below fail before any feature is read, so a stub pyrosm is
+# all they need: no geopandas, and they run wherever pytest does.
+
+
+def test_build_without_an_extract_says_so(tmp_path, monkeypatch, two_categories):
+    _fake_pyrosm(monkeypatch, _PathReader, None)
+    work = tmp_path / "work"
+    work.mkdir()
+    with pytest.raises(PipelineError, match="run the OSM step before"):
+        pois.build(work)
+
+
+def test_build_without_the_osm_manifest_says_so(tmp_path, monkeypatch, two_categories):
+    _fake_pyrosm(monkeypatch, _PathReader, None)
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / config.OSM_ASSET).write_bytes(EXTRACT_BYTES)
+    with pytest.raises(PipelineError, match="run the OSM step before"):
+        pois.build(work)
+
+
+def test_build_refuses_an_extract_that_lost_its_provenance(
+    tmp_path, monkeypatch, two_categories
+):
+    _fake_pyrosm(monkeypatch, _PathReader, None)
+    work = _produced_extract(tmp_path)
+    # The published extract and the manifest that measured it disagree.
+    (work / config.OSM_ASSET).write_bytes(b"some other extract")
+    with pytest.raises(PipelineError, match="does not match manifest-osm.json"):
+        pois.build(work)
+
+
+def test_build_refuses_an_extract_that_is_a_symlink(
+    tmp_path, monkeypatch, two_categories
+):
+    """A symlinked extract is refused rather than copied as a link —
+    the private copy must be bytes, not a pointer at bytes somebody
+    else can still change."""
+    _fake_pyrosm(monkeypatch, _PathReader, None)
+    work = _produced_extract(tmp_path)
+    elsewhere = tmp_path / "elsewhere.osm.pbf"
+    elsewhere.write_bytes(EXTRACT_BYTES)
+    extract = work / config.OSM_ASSET
+    extract.unlink()
+    extract.symlink_to(elsewhere)
+    with pytest.raises(PipelineError, match="cannot read the OSM extract"):
+        pois.build(work)
 
 
 def test_build_reads_a_private_copy_not_the_work_tree_extract(
