@@ -19,52 +19,66 @@ import tempfile
 
 from pipeline import PipelineError, config, manifest, workdir_lock
 
-#: Which asset each step manifest must describe — nothing more, nothing
-#: less; the smoke consumes exactly these files by name.
+#: Which assets each step manifest must describe — nothing more, nothing
+#: less; the smoke consumes exactly these files by name. A step that
+#: publishes a set of layers (the POIs) names them all.
 STEP_MANIFESTS = {
-    "manifest-osm.json": config.OSM_ASSET,
-    "manifest-gtfs.json": config.GTFS_ASSET,
-    "manifest-dem.json": config.DEM_ASSET,
-    "manifest-population.json": config.POPULATION_ASSET,
+    "manifest-osm.json": (config.OSM_ASSET,),
+    "manifest-gtfs.json": (config.GTFS_ASSET,),
+    "manifest-dem.json": (config.DEM_ASSET,),
+    "manifest-population.json": (config.POPULATION_ASSET,),
+    "manifest-pois.json": tuple(config.POI_ASSETS.values()),
 }
+
+
+def expected_assets(names=None) -> set:
+    """Every asset name the given step manifests must describe."""
+    table = names or STEP_MANIFESTS
+    merged = set()
+    for expected in table.values():
+        merged.update((expected,) if isinstance(expected, str) else expected)
+    return merged
 
 
 def verify_manifests(work_dir, names=None) -> dict:
     """Re-hash every asset against its step manifest; returns the merged
     records. A missing file, a digest drift, or a manifest describing
-    anything but its own expected asset fails — the release must ship
+    anything but its own expected assets fails — the release must ship
     exactly what the steps produced and measured."""
     work_dir = pathlib.Path(work_dir)
     merged = {}
     for name, expected in (names or STEP_MANIFESTS).items():
+        expected = (expected,) if isinstance(expected, str) else tuple(expected)
         path = work_dir / name
         if not path.exists():
             raise PipelineError(f"step manifest {name} is missing from {work_dir}")
         payload = manifest.read_manifest(path)
-        if set(payload["assets"]) != {expected}:
+        if set(payload["assets"]) != set(expected):
             raise PipelineError(
                 f"{name} describes {sorted(payload['assets'])}, expected "
-                f"exactly [{expected!r}]"
+                f"exactly {sorted(expected)}"
             )
-        record = payload["assets"][expected]
-        # The recorded filename is untrusted input: it must be the plain
-        # expected basename, and the file a regular non-symlink inside
-        # the work directory.
-        if record["file"] != expected:
-            raise PipelineError(
-                f"{name} records filename {record['file']!r}, expected " f"{expected!r}"
-            )
-        target = work_dir / expected
-        if target.is_symlink() or not target.is_file():
-            raise PipelineError(f"{target} is not a regular file")
-        digest, size = manifest.file_digest(target)
-        if digest != record["sha256"] or size != record["size"]:
-            raise PipelineError(
-                f"{expected} does not match its manifest "
-                f"({record['sha256']}/{record['size']} recorded, "
-                f"{digest}/{size} on disk)"
-            )
-        merged[expected] = record
+        for asset in expected:
+            record = payload["assets"][asset]
+            # The recorded filename is untrusted input: it must be the
+            # plain expected basename, and the file a regular non-symlink
+            # inside the work directory.
+            if record["file"] != asset:
+                raise PipelineError(
+                    f"{name} records filename {record['file']!r}, expected "
+                    f"{asset!r}"
+                )
+            target = work_dir / asset
+            if target.is_symlink() or not target.is_file():
+                raise PipelineError(f"{target} is not a regular file")
+            digest, size = manifest.file_digest(target)
+            if digest != record["sha256"] or size != record["size"]:
+                raise PipelineError(
+                    f"{asset} does not match its manifest "
+                    f"({record['sha256']}/{record['size']} recorded, "
+                    f"{digest}/{size} on disk)"
+                )
+            merged[asset] = record
     return merged
 
 
@@ -203,6 +217,81 @@ def check_bundled_factors(gtfs_path, snapshot_dir) -> pathlib.Path:
     return snapshot
 
 
+#: Central Helsinki in EPSG:3067 — the densest part of the street
+#: graph, where a walk between two nearby features is bounded well
+#: inside any routing cutoff.
+CENTRAL_HELSINKI = (385700, 6671500)
+
+
+def central_features(frame, count):
+    """The `count` features closest to central Helsinki. Arbitrary ones
+    can be a ferry pier or an outer island — and two of them can be a
+    day's walk apart, which no cutoff would route."""
+    projected = frame.to_crs(config.CAPITAL_REGION_CRS)
+    east, north = CENTRAL_HELSINKI
+    distance = (projected.geometry.centroid.x - east) ** 2 + (
+        projected.geometry.centroid.y - north
+    ) ** 2
+    return frame.loc[distance.nsmallest(count).index]
+
+
+def check_pois(assets, records, streets) -> None:
+    """Every POI layer comes from the extract this release ships, reads
+    as points with its expected coverage, and routes on the shipped
+    street network."""
+    import geopandas
+
+    extract = records[config.OSM_ASSET]["sha256"]
+    for category, asset in config.POI_ASSETS.items():
+        # The layers and the street network must be the same OSM bytes:
+        # points cut from another snapshot would disagree with the
+        # network about what exists and where.
+        stamp = records[asset]["source_stamp"]
+        if f"sha256={extract}" not in stamp:
+            raise PipelineError(
+                f"the {category!r} layer was not extracted from this "
+                f"release's OSM extract (sha256={extract}); its source "
+                f"stamp reads {stamp!r}"
+            )
+        pois = geopandas.read_file(assets[asset], layer=config.POI_LAYER)
+        minimum = config.POI_CATEGORIES[category]["minimum"]
+        if len(pois) < minimum:
+            raise PipelineError(
+                f"the {category!r} layer carries {len(pois)} features, "
+                f"expected at least {minimum}"
+            )
+        if pois.crs is None or pois.crs.to_epsg() != 4326:
+            raise PipelineError(f"the {category!r} layer is in {pois.crs}, not 4326")
+        if not (pois.geometry.geom_type == "Point").all():
+            raise PipelineError(f"the {category!r} layer carries non-point geometries")
+        missing = set(config.POI_COLUMNS) - set(pois.columns)
+        if missing:
+            raise PipelineError(
+                f"the {category!r} layer lost column(s) {sorted(missing)}"
+            )
+        if (pois["category"] != category).any():
+            raise PipelineError(
+                f"the {category!r} layer carries rows of another category"
+            )
+        # The category's central features must be usable as origins and
+        # destinations on the very street network this release ships: a
+        # layer of plausible coordinates off the network routes nowhere.
+        central = list(central_features(pois, 5).geometry)
+        walked = None
+        for start, end in zip(central, central[1:]):
+            seconds = streets.travel_time(
+                (start.y, start.x), (end.y, end.x), mode="walk"
+            )
+            if seconds is not None and math.isfinite(seconds) and seconds > 0:
+                walked = seconds
+                break
+        if walked is None:
+            raise PipelineError(
+                f"no walking journey between two central {category!r} "
+                f"features — the layer does not reach the street network"
+            )
+
+
 def run(work_dir, date) -> dict:
     """The full smoke: manifest verification, cafein builds, one query
     per surface — under the work-directory lock, and consuming private
@@ -308,6 +397,12 @@ def _run_locked(work_dir, snapshot_dir, date) -> dict:
     if ride is None or not math.isfinite(ride) or ride <= 0:
         raise PipelineError("the street network cannot ride across the region")
 
+    # POIs: every category reads as points in the extract's own CRS,
+    # and a walk between two of them proves they land on the streets
+    # the same release ships — a layer of plausible coordinates off the
+    # network would route nowhere.
+    check_pois(assets, records, streets)
+
     # Population grid: read, then route a few cells as polygon origins.
     grid = geopandas.read_file(grid_path, layer="population_grid")
     if grid.crs is None or grid.crs.to_epsg() != 3067:
@@ -321,10 +416,7 @@ def _run_locked(work_dir, snapshot_dir, date) -> dict:
     # The most central cells are on the street graph by construction —
     # arbitrary WFS-ordered ones might not be — and the proof demands a
     # journey between two *distinct* cells, not a diagonal zero.
-    centre_east, centre_north = 385700, 6671500  # central Helsinki, EPSG:3067
-    centroids = grid.geometry.centroid
-    distance = (centroids.x - centre_east) ** 2 + (centroids.y - centre_north) ** 2
-    cells = grid.loc[distance.nsmallest(5).index].copy()
+    cells = central_features(grid, 5).copy()
     cells["id"] = [f"cell-{index}" for index in range(len(cells))]
     matrix = TravelTimeMatrix(streets, cells, transport_mode="walk")
     import numpy

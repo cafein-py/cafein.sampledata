@@ -78,6 +78,7 @@ def test_dir_lists_the_public_surface():
         "gtfs",
         "dem",
         "population_grid",
+        "pois",
         "emission_factors",
         "metadata",
         "fetch",
@@ -85,16 +86,68 @@ def test_dir_lists_the_public_surface():
         assert expected in names
 
 
+# --- points of interest -----------------------------------------------------
+
+
+def test_pois_resolve_by_category(tmp_path, monkeypatch, cache):
+    """`helsinki.pois.library` downloads its own pinned layer."""
+    payload = b"a geopackage of libraries\n" * 8
+    root = tmp_path / "served"
+    root.mkdir()
+    (root / "helsinki_pois_library.gpkg").write_bytes(payload)
+    handler = functools.partial(
+        http.server.SimpleHTTPRequestHandler, directory=str(root)
+    )
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{httpd.server_address[1]}"
+    pinned = Asset(
+        name="helsinki_pois_library.gpkg",
+        url=f"{url}/helsinki_pois_library.gpkg",
+        sha256=hashlib.sha256(payload).hexdigest(),
+        size=len(payload),
+        license="ODbL 1.0",
+        attribution="© OpenStreetMap contributors",
+        release="helsinki-2026.08",
+    )
+    monkeypatch.setitem(_registry.ASSETS, "poi_library", pinned)
+    try:
+        path = helsinki.pois.library
+    finally:
+        httpd.shutdown()
+    assert path.read_bytes() == payload
+    assert path.name == "helsinki_pois_library.gpkg"
+    # Every category is reachable and listed, pinned or not.
+    assert "library" in dir(helsinki.pois)
+    assert "supermarket" in helsinki.pois.CATEGORIES
+
+
+def test_an_unpinned_poi_category_raises_with_guidance(cache):
+    # No data release carries the POI layers yet, so the shipped
+    # registry has no entry at all — the guidance must still be the
+    # "upgrade the package" one, not a KeyError.
+    if "poi_supermarket" in _registry.ASSETS:
+        pytest.skip("this build already pins the POI layers")
+    with pytest.raises(SampleDataError, match="pins no data release"):
+        helsinki.pois.supermarket
+
+
+def test_an_unknown_poi_category_raises_attribute_error():
+    with pytest.raises(AttributeError, match="no attribute"):
+        helsinki.pois.swimming_pool
+
+
 def test_metadata_surfaces_every_asset():
     table = helsinki.metadata
-    assert set(table) == {
-        "osm_pbf",
-        "gtfs",
-        "dem",
-        "population_grid",
+    # Whatever the shipped registry pins, plus the bundled files — the
+    # pins grow with each data release (the POI layers land in the next
+    # one), and metadata must follow without a test edit.
+    assert set(table) == set(_registry.ASSETS) | {
         "emission_factors",
         "emission_factors_full",
     }
+    for key in ("osm_pbf", "gtfs", "dem", "population_grid"):
+        assert key in table
     assert table["osm_pbf"]["license"] == "ODbL 1.0"
     assert "Dey" in table["emission_factors"]["attribution"]
     # The bundled files carry the same audit fields as the downloads.
@@ -301,4 +354,8 @@ def test_regenerate_survives_marker_text_inside_values(tmp_path):
 
 def test_the_shipped_registry_module_reimports():
     importlib.reload(_registry)
-    assert set(_registry.ASSETS) == set(registry.ATTRIBUTES)
+    # The shipped pins may lag the generator by one data release — an
+    # asset added to ATTRIBUTES only reaches the registry when a release
+    # produces it — but nothing may be pinned that the generator does
+    # not know how to rewrite.
+    assert set(_registry.ASSETS) <= set(registry.ATTRIBUTES)

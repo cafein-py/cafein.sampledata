@@ -14,7 +14,7 @@ import json
 import pathlib
 import re
 
-from pipeline import PipelineError, manifest
+from pipeline import PipelineError, config, manifest
 
 REGISTRY_PATH = (
     pathlib.Path(__file__).resolve().parent.parent
@@ -27,13 +27,18 @@ REGISTRY_PATH = (
 BEGIN = "# --- REGISTRY (generated; do not edit by hand) ---"
 END = "# --- END REGISTRY ---"
 
-#: Which manifest asset feeds which registry attribute.
+#: Which manifest asset feeds which registry attribute. The POI layers
+#: are keyed ``poi_<category>``; the client's ``pois`` namespace reads
+#: them under their bare category names.
 ATTRIBUTES = {
     "osm_pbf": "helsinki_capital_region.osm.pbf",
     "gtfs": "hsl_gtfs.zip",
     "dem": "helsinki_dem_10m.tif",
     "population_grid": "hsy_population_grid_250m.gpkg",
 }
+ATTRIBUTES.update(
+    {f"poi_{category}": asset for category, asset in config.POI_ASSETS.items()}
+)
 
 
 RELEASE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")

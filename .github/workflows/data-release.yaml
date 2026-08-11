@@ -51,6 +51,11 @@ jobs:
       - name: OSM step
         shell: bash -el {0}
         run: python -m pipeline.osm work --snapshot-date "$SNAPSHOT_DATE"
+      - name: POI step
+        # Reads the extract the OSM step just published, so the points
+        # and the street network cover one and the same area.
+        shell: bash -el {0}
+        run: python -m pipeline.pois work
       - name: GTFS step
         shell: bash -el {0}
         run: python -m pipeline.gtfs work --reference-date "$REFERENCE_DATE"
@@ -83,6 +88,13 @@ jobs:
             work/hsl_gtfs.zip \
             work/helsinki_dem_10m.tif \
             work/hsy_population_grid_250m.gpkg \
+            work/helsinki_pois_library.gpkg \
+            work/helsinki_pois_kindergarten.gpkg \
+            work/helsinki_pois_university.gpkg \
+            work/helsinki_pois_supermarket.gpkg \
+            work/helsinki_pois_shopping_centre.gpkg \
+            work/helsinki_pois_sports_centre.gpkg \
+            work/helsinki_pois_swimming_hall.gpkg \
             work/manifest.json \
             work/gtfs-validation-report.json \
             work/LICENSES.txt

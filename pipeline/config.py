@@ -68,6 +68,8 @@ NLS_DEM_SCALEFACTOR = 0.2
 # when pyproj is available, so drift fails loudly):
 # (east_min, north_min, east_max, north_max).
 CAPITAL_REGION_BBOX_3067 = (354700, 6647100, 404800, 6699900)
+# The projected CRS the region's metric work happens in.
+CAPITAL_REGION_CRS = "EPSG:3067"
 
 # One WCS GetCoverage per chunk; the server caps elevation requests at
 # 10 x 10 km, and 10 km at 10 m is a 1000 px tile, a few MB.
@@ -129,3 +131,51 @@ MIN_POPULATION_CELLS = 3000
 POPULATION_ASSET = "hsy_population_grid_250m.gpkg"
 POPULATION_LICENSE = "CC BY 4.0"
 POPULATION_ATTRIBUTION = "Helsinki Region Environmental Services HSY population grid"
+
+# --- Points of interest (OSM) -----------------------------------------------
+
+# Destination categories extracted from the capital-region extract, one
+# GeoPackage each. `tags` is the pyrosm filter; `sport` (when given) is
+# an extra requirement on the feature's own `sport` tag, which the
+# filter cannot express — pyrosm keeps a feature matching *any* filter
+# key, so a two-key filter would widen the category rather than narrow
+# it. `minimum` is the count below which the category is treated as an
+# upstream tagging change rather than a thin month; the counts in the
+# comments are the 2026-08 extract's.
+POI_CATEGORIES = {
+    "library": {"tags": {"amenity": ["library"]}, "minimum": 50},  # 103
+    "kindergarten": {"tags": {"amenity": ["kindergarten"]}, "minimum": 400},  # 843
+    "university": {"tags": {"amenity": ["university"]}, "minimum": 12},  # 27
+    "supermarket": {"tags": {"shop": ["supermarket"]}, "minimum": 100},  # 218
+    "shopping_centre": {"tags": {"shop": ["mall"]}, "minimum": 40},  # 87
+    "sports_centre": {"tags": {"leisure": ["sports_centre"]}, "minimum": 150},  # 342
+    # The swimming halls are sports centres whose sport is swimming;
+    # leisure=swimming_pool is the water basin, not the facility, and
+    # names the region's paddling pools rather than its halls.
+    "swimming_hall": {
+        "tags": {"leisure": ["sports_centre"]},
+        "sport": "swimming",
+        "minimum": 15,
+    },  # 33
+}
+
+#: The layer inside every POI GeoPackage, and the file name pattern.
+POI_LAYER = "pois"
+POI_ASSET_TEMPLATE = "helsinki_pois_{category}.gpkg"
+
+#: The columns every POI layer carries, in order.
+POI_COLUMNS = ("osm_id", "osm_type", "name", "category", "tags")
+
+# The POIs are extracted from the OSM extract this same run produced,
+# so both cover one and the same area; features are served as points
+# (ways and relations reduced to their centroid), in OSM's own CRS.
+POI_CRS = "EPSG:4326"
+POI_LICENSE = OSM_LICENSE
+POI_ATTRIBUTION = OSM_ATTRIBUTION
+
+
+def poi_asset(category) -> str:
+    return POI_ASSET_TEMPLATE.format(category=category)
+
+
+POI_ASSETS = {category: poi_asset(category) for category in POI_CATEGORIES}

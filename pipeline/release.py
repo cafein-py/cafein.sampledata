@@ -45,6 +45,20 @@ MODIFICATIONS = {
     ),
 }
 
+# The POI layers are a derived database under the ODbL: selected from
+# the extract by tag, reduced to points, and re-published as their own
+# files.
+MODIFICATIONS.update(
+    {
+        asset: (
+            f"selected from {config.OSM_ASSET} as the {category!r} "
+            f"category, ways and relations reduced to their centroid, "
+            f"and written to GeoPackage"
+        )
+        for category, asset in config.POI_ASSETS.items()
+    }
+)
+
 
 def assemble(work_dir, tag) -> dict:
     """Write the release artifacts; returns the merged records."""

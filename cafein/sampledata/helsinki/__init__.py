@@ -7,6 +7,9 @@ first access (see the package README for the cache):
 - ``gtfs`` — the HSL GTFS feed, transitio-validated at release time
 - ``dem`` — the NLS 10 m elevation model, EPSG:3067 COG
 - ``population_grid`` — HSY's 250 m population grid, GeoPackage
+- ``pois`` — OpenStreetMap destinations by category, a GeoPackage of
+  points each: ``pois.library``, ``pois.supermarket``, … (see
+  ``cafein.sampledata.helsinki.pois``)
 - ``emission_factors`` — cafein's default transit GHG factors as a
   CSV bundled in the wheel (no download), in exactly the schema
   ``cafein.emissions.load_factors`` consumes
@@ -71,13 +74,17 @@ __all__ = [
     "gtfs",
     "metadata",
     "osm_pbf",
+    "pois",
     "population_grid",
 ]
 
 
 def _resolve(name):
-    asset = _registry.ASSETS[name]
-    if not asset.sha256:
+    asset = _registry.ASSETS.get(name)
+    # A build predating the asset's first data release carries no entry
+    # at all; that is the same "upgrade the package" situation as an
+    # entry with no pin, and reads better than a KeyError.
+    if asset is None or not asset.sha256:
         raise SampleDataError(
             f"this build of cafein.sampledata pins no data release for "
             f"{name!r} yet — upgrade cafein.sampledata to a released "
@@ -91,6 +98,10 @@ def __getattr__(name):
         return _resolve(name)
     if name in _FACTOR_FILES:
         return _FACTOR_FILES[name]
+    if name == "pois":
+        import importlib
+
+        return importlib.import_module(f"{__name__}.pois")
     if name == "metadata":
         table = {key: asset.metadata() for key, asset in _registry.ASSETS.items()}
         for key, path in _FACTOR_FILES.items():
