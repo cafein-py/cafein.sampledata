@@ -62,9 +62,15 @@ jobs:
           assert Version(tag[1:]) == Version(version), (
               f"tag {tag!r} != version {version!r}"
           )
+          # The version's month must be the pinned data release's month.
+          # Which release of that month is not derivable from the
+          # version: a corrected data release carries a serial
+          # (helsinki-2026.08.1), and a package-only fix bumps the patch
+          # while pinning the month's first release.
           expected = f"helsinki-{match.group(1)}.{int(match.group(2)):02d}"
-          assert _registry.RELEASE == expected, (
-              f"registry pins {_registry.RELEASE!r}, tag implies {expected!r}"
+          assert re.fullmatch(rf"{re.escape(expected)}(\.\d+)?", _registry.RELEASE), (
+              f"registry pins {_registry.RELEASE!r}, tag implies "
+              f"{expected!r} or a serial of it"
           )
           # The pins must be exactly the published data release's
           # manifest: same asset set, same fields, exact URLs.
