@@ -6,29 +6,25 @@ from pipeline import PipelineError, config, manifest, release, smoke
 
 
 def _produced_work_dir(tmp_path):
-    """A work dir as the four steps leave it, with tiny stand-in assets."""
-    payloads = {
-        "manifest-osm.json": (config.OSM_ASSET, b"osm bytes"),
-        "manifest-gtfs.json": (config.GTFS_ASSET, b"gtfs bytes"),
-        "manifest-dem.json": (config.DEM_ASSET, b"dem bytes"),
-        "manifest-population.json": (config.POPULATION_ASSET, b"grid bytes"),
-    }
-    for manifest_name, (asset, payload) in payloads.items():
-        (tmp_path / asset).write_bytes(payload)
-        record = manifest.asset_record(
-            tmp_path / asset,
-            license="CC BY 4.0",
-            attribution=f"source of {asset}",
-            source_stamp=f"stamp of {asset}",
-        )
-        manifest.write_manifest(tmp_path / manifest_name, {asset: record})
+    """A work dir as the steps leave it, with tiny stand-in assets."""
+    for manifest_name, assets in smoke.STEP_MANIFESTS.items():
+        records = {}
+        for asset in assets:
+            (tmp_path / asset).write_bytes(f"{asset} bytes".encode())
+            records[asset] = manifest.asset_record(
+                tmp_path / asset,
+                license="CC BY 4.0",
+                attribution=f"source of {asset}",
+                source_stamp=f"stamp of {asset}",
+            )
+        manifest.write_manifest(tmp_path / manifest_name, records)
     return tmp_path
 
 
 def test_assemble_writes_the_release_artifacts(tmp_path):
     work = _produced_work_dir(tmp_path)
     records = release.assemble(work, "helsinki-2026.08")
-    assert set(records) == set(smoke.STEP_MANIFESTS.values())
+    assert set(records) == smoke.expected_assets()
     combined = manifest.read_manifest(work / "manifest.json")
     assert set(combined["assets"]) == set(records)
     licenses = (work / "LICENSES.txt").read_text()
