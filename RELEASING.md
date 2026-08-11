@@ -2,10 +2,17 @@
 
 Two release kinds, both gated on a human click.
 
-## 1. A data release (`helsinki-YYYY.MM`)
+## 1. A data release (`helsinki-YYYY.MM[.N]`)
+
+A published data release is immutable: package versions pin it by tag
+and sha256, so correcting the data means cutting a *new* tag, never
+moving or deleting an old one. Routine refreshes are `helsinki-YYYY.MM`;
+a second release within the same month appends a serial —
+`helsinki-2026.08.1`, `helsinki-2026.08.2` — so a fix never has to wait
+for the calendar.
 
 1. Run the **data-release** workflow (Actions → data-release → Run
-   workflow) with the release tag (`helsinki-YYYY.MM`), a Geofabrik
+   workflow) with the release tag (`helsinki-YYYY.MM[.N]`), a Geofabrik
    snapshot date (`YYMMDD`, an immutable dated source), and a service
    date inside the fresh feed (`YYYY-MM-DD`, usually a near-future
    weekday). Requires the `MML_API_KEY` repository secret.
@@ -23,12 +30,19 @@ Two release kinds, both gated on a human click.
    and bump the version, then PR and merge:
 
    ```bash
-   gh release download helsinki-YYYY.MM --pattern manifest.json --dir /tmp
-   python -m pipeline.registry /tmp/manifest.json helsinki-YYYY.MM
-   # pyproject.toml: version = "YYYY.MM.0" (mirrors the data tag)
+   TAG=helsinki-YYYY.MM[.N]   # the data release just published
+   gh release download "$TAG" --pattern manifest.json --dir /tmp
+   python -m pipeline.registry /tmp/manifest.json "$TAG"
+   # pyproject.toml: version = "YYYY.MM.PATCH"
    ```
 
-2. Tag the merged commit `vYYYY.MM.0` and push the tag. The **release**
+   The version's `YYYY.MM` follows the data tag's month; `PATCH` is the
+   next free number for that month, whether the release carries new data
+   or only package-code changes. A package release always pins exactly
+   one data tag.
+
+2. Tag the merged commit `vYYYY.MM.PATCH` (the version just set in
+   `pyproject.toml`) and push the tag. The **release**
    workflow runs the tests, refuses an unpinned registry, builds, and
    pauses on the `pypi` environment — **approve the deployment** to
    publish through the PyPI trusted publisher. No tokens exist
