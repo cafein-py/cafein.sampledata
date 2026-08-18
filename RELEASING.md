@@ -1,6 +1,12 @@
 # Releasing
 
-Two release kinds, both gated on a human click.
+Three release kinds. The two below are gated on a human click; the
+third, rarer kind is the `sources-*` release: a mirror of immutable
+source bytes whose origin refuses automated clients — e.g.
+`sources-green-view` carries the publisher's supplement archives,
+sha256-pinned in `pipeline/config.py` so the pins prove the mirror
+serves the published data. Same immutability rule everywhere: a
+correction is a new tag, never a moved one.
 
 ## 1. A data release (`helsinki-YYYY.MM[.N]`)
 
