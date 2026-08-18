@@ -431,12 +431,10 @@ def test_a_redirected_or_malformed_reference_is_refused():
         air_quality.validate_reference(good + "#x", origin, instant(6))
 
 
-def test_a_wrong_or_missing_netcdf_origin_is_refused(tmp_path):
+def test_a_wrong_declared_origin_is_refused(tmp_path):
     pytest.importorskip("rioxarray")
     xarray = pytest.importorskip("xarray")
     source = synthetic_netcdf(tmp_path / "plain.nc", hours=(6,))
-    with pytest.raises(PipelineError, match="declares no model origin"):
-        air_quality.write_cog(source, tmp_path / "out.tif", instant(6), instant(4))
     dataset = xarray.open_dataset(source)
     dataset.attrs["origintime"] = "2026-08-18T02:00:00Z"
     wrong = tmp_path / "wrong_origin.nc"
@@ -444,6 +442,17 @@ def test_a_wrong_or_missing_netcdf_origin_is_refused(tmp_path):
     dataset.close()
     with pytest.raises(PipelineError, match="wrong model run"):
         air_quality.write_cog(wrong, tmp_path / "out.tif", instant(6), instant(4))
+
+
+def test_an_undeclared_origin_binds_by_reference(tmp_path):
+    # The live service ships NetCDFs with no origin metadata at all;
+    # they stay bound by the validated download reference.
+    pytest.importorskip("rioxarray")
+    source = synthetic_netcdf(tmp_path / "plain.nc", hours=(6,))
+    _, binding = air_quality.write_cog(
+        source, tmp_path / "out.tif", instant(6), instant(4)
+    )
+    assert binding == "bound by the validated download reference"
 
 
 def test_a_declared_matching_origin_passes(tmp_path):
@@ -457,7 +466,8 @@ def test_a_declared_matching_origin_passes(tmp_path):
     dataset.to_netcdf(bound)
     dataset.close()
     out = tmp_path / "out.tif"
-    air_quality.write_cog(bound, out, instant(6), instant(4))
+    _, binding = air_quality.write_cog(bound, out, instant(6), instant(4))
+    assert binding == "declared in the file"
     with rasterio.open(out) as raster:
         assert raster.count == len(config.AIR_QUALITY_BANDS)
 
@@ -489,8 +499,42 @@ def test_a_coordinate_declared_origin_binds(tmp_path):
     dataset.to_netcdf(bound)
     dataset.close()
     out = tmp_path / "out.tif"
-    air_quality.write_cog(bound, out, instant(6), instant(4))
+    _, binding = air_quality.write_cog(bound, out, instant(6), instant(4))
+    assert binding == "declared in the file"
     with rasterio.open(out) as raster:
         assert raster.count == len(config.AIR_QUALITY_BANDS)
     with pytest.raises(PipelineError, match="wrong model run"):
         air_quality.write_cog(bound, tmp_path / "o2.tif", instant(6), instant(2))
+
+
+def test_an_empty_declared_origin_is_refused(tmp_path):
+    # Present-but-empty metadata is malformed, not "no declaration".
+    pytest.importorskip("rioxarray")
+    xarray = pytest.importorskip("xarray")
+    source = synthetic_netcdf(tmp_path / "empty.nc", hours=(6,))
+    dataset = xarray.open_dataset(source)
+    dataset.attrs["origintime"] = ""
+    hollow = tmp_path / "empty_origin.nc"
+    dataset.to_netcdf(hollow)
+    dataset.close()
+    with pytest.raises(PipelineError, match="invalid ENFUSER hour"):
+        air_quality.write_cog(hollow, tmp_path / "out.tif", instant(6), instant(4))
+
+
+def test_conflicting_declared_origins_are_refused(tmp_path):
+    # A matching coordinate must not shadow a conflicting attribute:
+    # every declaration has to agree with the selected member.
+    pytest.importorskip("rioxarray")
+    numpy = pytest.importorskip("numpy")
+    xarray = pytest.importorskip("xarray")
+    source = synthetic_netcdf(tmp_path / "conflict.nc", hours=(6,))
+    dataset = xarray.open_dataset(source)
+    dataset = dataset.assign_coords(
+        forecast_reference_time=numpy.datetime64("2026-08-18T04:00:00")
+    )
+    dataset.attrs["origintime"] = "2026-08-18T02:00:00Z"
+    conflicted = tmp_path / "conflict_bound.nc"
+    dataset.to_netcdf(conflicted)
+    dataset.close()
+    with pytest.raises(PipelineError, match="wrong model run"):
+        air_quality.write_cog(conflicted, tmp_path / "out.tif", instant(6), instant(4))

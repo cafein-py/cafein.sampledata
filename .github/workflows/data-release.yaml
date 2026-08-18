@@ -54,6 +54,18 @@ jobs:
         # byte-equality check must run against the newest release.
         shell: bash -el {0}
         run: python -m pip install -U cafein
+      # The newest steps run first: they are the most likely to hit
+      # live-service drift, and failing before the heavy established
+      # downloads keeps the feedback loop short.
+      - name: Air-quality step
+        shell: bash -el {0}
+        run: python -m pipeline.air_quality work "$AIRQUALITY_HOUR"
+      - name: Green view step
+        shell: bash -el {0}
+        run: python -m pipeline.green_view work
+      - name: Noise step
+        shell: bash -el {0}
+        run: python -m pipeline.noise work
       - name: OSM step
         shell: bash -el {0}
         run: python -m pipeline.osm work --snapshot-date "$SNAPSHOT_DATE"
@@ -73,15 +85,6 @@ jobs:
       - name: Population step
         shell: bash -el {0}
         run: python -m pipeline.population work
-      - name: Air-quality step
-        shell: bash -el {0}
-        run: python -m pipeline.air_quality work "$AIRQUALITY_HOUR"
-      - name: Green view step
-        shell: bash -el {0}
-        run: python -m pipeline.green_view work
-      - name: Noise step
-        shell: bash -el {0}
-        run: python -m pipeline.noise work
       - name: Smoke build (cafein consumes every asset)
         shell: bash -el {0}
         run: python -m pipeline.smoke work "$REFERENCE_DATE"
@@ -110,6 +113,9 @@ jobs:
             work/helsinki_pois_shopping_centre.gpkg \
             work/helsinki_pois_sports_centre.gpkg \
             work/helsinki_pois_swimming_hall.gpkg \
+            work/helsinki_air_quality.tif \
+            work/helsinki_green_view.gpkg \
+            work/helsinki_noise_2022.gpkg \
             work/manifest.json \
             work/gtfs-validation-report.json \
             work/LICENSES.txt
