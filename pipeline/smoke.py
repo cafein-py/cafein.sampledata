@@ -440,8 +440,11 @@ def _run_locked(work_dir, snapshot_dir, date) -> dict:
     sampled = sample_stops(stops)
     saw_service = False
     ridden = None
+    # cafein takes one departure instant ("YYYY-MM-DD HH:MM"); the
+    # service date is its date part.
+    departure = f"{date} 08:30"
     for origin in sampled:
-        times = network.travel_times_from_stop(origin, date, "08:30:00")
+        times = network.travel_times_from_stop(origin, departure)
         candidates = [
             stop
             for stop, seconds in times.items()
@@ -449,9 +452,7 @@ def _run_locked(work_dir, snapshot_dir, date) -> dict:
         ]
         saw_service = saw_service or bool(candidates)
         for destination in candidates[:20]:
-            journeys = network.route_between_stops(
-                origin, destination, date, "08:30:00"
-            )
+            journeys = network.route_between_stops(origin, destination, departure)
             annotated = network.annotate_emissions(
                 journeys, factors=str(factors_snapshot)
             )
@@ -508,11 +509,13 @@ def _run_locked(work_dir, snapshot_dir, date) -> dict:
     # journey between two *distinct* cells, not a diagonal zero.
     cells = central_features(grid, 5).copy()
     cells["id"] = [f"cell-{index}" for index in range(len(cells))]
-    matrix = TravelTimeMatrix(streets, cells, transport_mode="walk")
+    matrix = TravelTimeMatrix(
+        streets, cells, transport_mode="walk", output_time_units="seconds"
+    )
     import numpy
 
     off_diagonal = matrix[matrix.from_id != matrix.to_id]
-    durations = off_diagonal.travel_time_s.astype("float64")
+    durations = off_diagonal.travel_time.astype("float64")
     if off_diagonal.empty or not ((durations > 0) & numpy.isfinite(durations)).any():
         raise PipelineError(
             "no finite positive-duration walking journey between "
