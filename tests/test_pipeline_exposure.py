@@ -150,9 +150,25 @@ def test_cf_unit_spellings_collapse():
     assert air_quality._normalized_unit("um2 cm-3") == "um2/cm3"
     assert air_quality._normalized_unit("cm-3") == "1/cm3"
     assert air_quality._normalized_unit("1/cm3") == "1/cm3"
+    assert air_quality._normalized_unit("#/cm3") == "1/cm3"
     assert air_quality._normalized_unit("mg/m3") != air_quality._normalized_unit(
         "ug/m3"
     )
+
+
+def test_fmi_unit_alias_passes(tmp_path):
+    # The live LDSA variable declares 'um2/cm' — FMI's own metadata,
+    # tolerated through the documented alias table.
+    pytest.importorskip("rioxarray")
+    xarray = pytest.importorskip("xarray")
+    source = synthetic_netcdf(tmp_path / "ldsa.nc", hours=(6,), origin_hour=4)
+    dataset = xarray.open_dataset(source)
+    ldsa = _band_variable(dataset, "LungDepositedSurfaceArea")
+    dataset[ldsa].attrs["units"] = "um2/cm"
+    rewritten = tmp_path / "ldsa_units.nc"
+    dataset.to_netcdf(rewritten)
+    dataset.close()
+    air_quality.write_cog(rewritten, tmp_path / "out.tif", instant(6), instant(4))
 
 
 def test_an_equivalent_cf_unit_spelling_passes(tmp_path):

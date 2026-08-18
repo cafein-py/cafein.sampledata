@@ -178,11 +178,13 @@ def write_cog(netcdf_path, out, valid_hour: datetime, origin: datetime):
                 )
             variable = hour[matches[0]]
             declared = str(variable.attrs.get("units", "")).strip()
-            if declared and _normalized_unit(declared) != _normalized_unit(unit):
+            normalized = _normalized_unit(declared)
+            normalized = config.AIR_QUALITY_UNIT_ALIASES.get(normalized, normalized)
+            if declared and normalized != _normalized_unit(unit):
                 raise PipelineError(
                     f"{matches[0]} declares units {declared!r}, the pinned "
                     f"table says {unit!r} — refusing a silent relabel "
-                    f"(attrs: {dict(variable.attrs)})"
+                    f"(all declared units: {units_map})"
                 )
             bands.append(variable.astype("float32"))
         stack = xarray.concat(bands, dim="band")
@@ -260,7 +262,7 @@ def _normalized_unit(text) -> str:
     ('µg m-3', 'ug/m3', 'ug.m-3'); a real mismatch (mg vs ug) still
     differs."""
     unit = str(text).strip().lower()
-    for source, target in (("µ", "u"), ("³", "3"), ("²", "2")):
+    for source, target in (("µ", "u"), ("³", "3"), ("²", "2"), ("#", "1")):
         unit = unit.replace(source, target)
     for gone in (" ", ".", "*"):
         unit = unit.replace(gone, "")

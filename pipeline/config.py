@@ -221,6 +221,10 @@ AIR_QUALITY_BANDS = (
     ("BlackCarbonConcentration", "BlackCarbonConcentration", "ug/m3"),
     ("ParticleNumberConcentration", "ParticleNumberConcentration", "1/cm3"),
 )
+#: Source spellings FMI's own metadata carries that differ from the
+#: physical unit, in normalized form. The live LDSA variable declares
+#: 'um2/cm' (2026-08-18 run); ENFUSER documents LDSA in um2/cm3.
+AIR_QUALITY_UNIT_ALIASES = {"um2/cm": "um2/cm3"}
 MAX_ENFUSER_NETCDF_BYTES = 512 * 1024 * 1024
 
 # The green view dataset for the Finnish capital region (Data in
