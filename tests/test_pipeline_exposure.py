@@ -184,6 +184,18 @@ def test_an_equivalent_cf_unit_spelling_passes(tmp_path):
     air_quality.write_cog(rewritten, tmp_path / "out.tif", instant(6), instant(4))
 
 
+def test_a_truncated_netcdf_is_refused_with_a_clear_error(tmp_path):
+    # FMI generates the NetCDF on demand; a server-side fault delivers
+    # a complete-looking payload that does not parse.
+    pytest.importorskip("rioxarray")
+    source = synthetic_netcdf(tmp_path / "whole.nc", hours=(6,), origin_hour=4)
+    payload = source.read_bytes()
+    clipped = tmp_path / "clipped.nc"
+    clipped.write_bytes(payload[: len(payload) // 3])
+    with pytest.raises(PipelineError, match="failed to parse"):
+        air_quality.write_cog(clipped, tmp_path / "out.tif", instant(6), instant(4))
+
+
 def test_a_singleton_extra_dimension_is_squeezed(tmp_path):
     # The live variables carry a singleton CF vertical level beyond
     # (time, lat, lon); the writer squeezes it away.
