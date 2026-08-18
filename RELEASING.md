@@ -2,6 +2,13 @@
 
 Two release kinds, both gated on a human click.
 
+(A third, rarer kind: `sources-*` releases mirror immutable source
+bytes whose origin refuses automated clients — e.g.
+`sources-green-view` carries the publisher's supplement archives,
+sha256-pinned in `pipeline/config.py` so the pins prove the mirror
+serves the published data. Same immutability rule: a correction is a
+new tag, never a moved one.)
+
 ## 1. A data release (`helsinki-YYYY.MM[.N]`)
 
 A published data release is immutable: package versions pin it by tag

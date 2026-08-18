@@ -231,15 +231,21 @@ MAX_ENFUSER_NETCDF_BYTES = 512 * 1024 * 1024
 # Brief, article S2352340920304959): street-level visible greenery
 # from Google Street View panoramas via semantic segmentation. The
 # publisher's supplement files are immutable published bytes, pinned
-# by sha256.
+# by sha256 and mirrored as assets of this repo's `sources-green-view`
+# release (the publisher's CDN refuses non-browser clients; the pins
+# prove the mirror bytes ARE the published supplements).
+GREEN_VIEW_MIRROR = (
+    "https://github.com/cafein-py/cafein.sampledata/releases/download"
+    "/sources-green-view"
+)
 GREEN_VIEW_SUPPLEMENTS = (
     (
-        "https://ars.els-cdn.com/content/image/1-s2.0-S2352340920304959-mmc2.zip",
+        f"{GREEN_VIEW_MIRROR}/1-s2.0-S2352340920304959-mmc2.zip",
         "330e215a8d8479212953338fe4daf355618900b647c2265da73696d57f7b12ce",
         "greenery_points.gpkg",
     ),
     (
-        "https://ars.els-cdn.com/content/image/1-s2.0-S2352340920304959-mmc3.zip",
+        f"{GREEN_VIEW_MIRROR}/1-s2.0-S2352340920304959-mmc3.zip",
         "8b591f4168904c84889761ee0cb5bec784359c5dc6b97954f048a60f262be191",
         "greenery_roads.gpkg",
     ),
