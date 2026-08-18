@@ -184,6 +184,37 @@ def test_an_equivalent_cf_unit_spelling_passes(tmp_path):
     air_quality.write_cog(rewritten, tmp_path / "out.tif", instant(6), instant(4))
 
 
+def test_a_singleton_extra_dimension_is_squeezed(tmp_path):
+    # The live variables carry a singleton CF vertical level beyond
+    # (time, lat, lon); the writer squeezes it away.
+    pytest.importorskip("rioxarray")
+    rasterio = pytest.importorskip("rasterio")
+    xarray = pytest.importorskip("xarray")
+    source = synthetic_netcdf(tmp_path / "level.nc", hours=(6,), origin_hour=4)
+    dataset = xarray.open_dataset(source)
+    dataset = dataset.expand_dims(height=1)
+    leveled = tmp_path / "leveled.nc"
+    dataset.to_netcdf(leveled)
+    dataset.close()
+    out = tmp_path / "out.tif"
+    air_quality.write_cog(leveled, out, instant(6), instant(4))
+    with rasterio.open(out) as raster:
+        assert raster.count == len(config.AIR_QUALITY_BANDS)
+
+
+def test_a_non_singleton_extra_dimension_is_refused(tmp_path):
+    pytest.importorskip("rioxarray")
+    xarray = pytest.importorskip("xarray")
+    source = synthetic_netcdf(tmp_path / "levels.nc", hours=(6,), origin_hour=4)
+    dataset = xarray.open_dataset(source)
+    dataset = dataset.expand_dims(height=2)
+    leveled = tmp_path / "two_levels.nc"
+    dataset.to_netcdf(leveled)
+    dataset.close()
+    with pytest.raises(PipelineError, match="non-singleton extra"):
+        air_quality.write_cog(leveled, tmp_path / "out.tif", instant(6), instant(4))
+
+
 def test_an_ambiguous_band_match_is_refused(tmp_path):
     pytest.importorskip("rioxarray")
     xarray = pytest.importorskip("xarray")
