@@ -67,8 +67,12 @@ jobs:
         shell: bash -el {0}
         run: python -m pipeline.noise work
       - name: OSM step
+        # out_of_core decodes in parallel (workers=auto: one per core);
+        # in_memory would read the country extract on a single core.
         shell: bash -el {0}
-        run: python -m pipeline.osm work --snapshot-date "$SNAPSHOT_DATE"
+        run: >-
+          python -m pipeline.osm work --snapshot-date "$SNAPSHOT_DATE"
+          --engine out_of_core
       - name: POI step
         # Reads the extract the OSM step just published, so the points
         # and the street network cover one and the same area.
