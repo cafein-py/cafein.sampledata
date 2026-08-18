@@ -88,10 +88,22 @@ def normalized_layers(points_path, roads_path, out) -> pathlib.Path:
                 f"the roads layer has no {column!r} column (columns: "
                 f"{sorted(roads.columns)})"
             )
-    for column in ("GSV_GVI", "LU_GVI", "Comb_GVI"):
+    for column in ("LU_GVI", "Comb_GVI"):
         values = roads[column].dropna()
         if ((values < 0) | (values > 100)).any():
             raise PipelineError(f"{column} outside [0, 100] — wrong layer?")
+    # GSV_GVI carries -1.0 as the published no-coverage sentinel: those
+    # segments' Comb_GVI comes from LU_GVI, named by GVI_source. The
+    # sentinel and the source column must agree row for row.
+    gsv = roads["GSV_GVI"].dropna()
+    measured = gsv[gsv != -1.0]
+    if ((measured < 0) | (measured > 100)).any():
+        raise PipelineError("GSV_GVI outside [0, 100] — wrong layer?")
+    if not ((roads["GSV_GVI"] == -1.0) == (roads["GVI_source"] == "land_use")).all():
+        raise PipelineError(
+            "the GSV_GVI no-coverage sentinel (-1) does not line up with "
+            "GVI_source 'land_use' — the published encoding drifted"
+        )
     # The published roads file carries TM35FIN as an authority-less
     # WKT; tag the EPSG code it is (same axes, same datum), never
     # reproject what is already metric.
