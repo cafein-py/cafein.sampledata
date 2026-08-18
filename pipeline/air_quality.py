@@ -160,6 +160,14 @@ def write_cog(netcdf_path, out, valid_hour: datetime, origin: datetime):
             )
         origin_declared = _verify_origin(dataset, origin)
         hour = dataset.sel(time=numpy.datetime64(valid_hour.replace(tzinfo=None)))
+        for x_name, y_name in (("lon", "lat"), ("longitude", "latitude"), ("x", "y")):
+            if x_name in hour.dims and y_name in hour.dims:
+                break
+        else:
+            raise PipelineError(
+                f"unrecognised spatial dimensions {sorted(hour.dims)} in "
+                "the ENFUSER NetCDF — the FMI layout changed"
+            )
         by_base = {}
         for variable in map(str, hour.data_vars):
             by_base.setdefault(re.sub(r"_\d+$", "", variable), []).append(variable)
@@ -186,19 +194,23 @@ def write_cog(netcdf_path, out, valid_hour: datetime, origin: datetime):
                     f"table says {unit!r} — refusing a silent relabel "
                     f"(all declared units: {units_map})"
                 )
+            # The live variables carry extra CF dimensions beyond the
+            # spatial two (a singleton vertical level); squeeze those,
+            # refuse anything a squeeze would have to pick from.
+            for extra in [d for d in variable.dims if d not in (x_name, y_name)]:
+                if variable.sizes[extra] != 1:
+                    raise PipelineError(
+                        f"{matches[0]} carries a non-singleton extra "
+                        f"dimension {extra!r} (sizes: "
+                        f"{dict(variable.sizes)}) — refusing an ambiguous "
+                        "slice"
+                    )
+                variable = variable.squeeze(extra, drop=True)
             bands.append(variable.astype("float32"))
         stack = xarray.concat(bands, dim="band")
         stack = stack.assign_coords(
             band=list(range(1, len(config.AIR_QUALITY_BANDS) + 1))
         )
-        for x_name, y_name in (("lon", "lat"), ("longitude", "latitude"), ("x", "y")):
-            if x_name in stack.dims and y_name in stack.dims:
-                break
-        else:
-            raise PipelineError(
-                f"unrecognised spatial dimensions {sorted(stack.dims)} in "
-                "the ENFUSER NetCDF — the FMI layout changed"
-            )
         # The coordinates must BE geographic degrees over the metro
         # window before EPSG:4326 is assigned — projected metres would
         # otherwise publish a misregistered raster.
