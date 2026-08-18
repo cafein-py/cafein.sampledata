@@ -241,23 +241,29 @@ GREEN_VIEW_POINT_COUNT = 92126
 GREEN_VIEW_ROAD_COUNT = 56074
 MAX_GREEN_VIEW_ZIP_BYTES = 64 * 1024 * 1024
 
-# Helsinki meluselvitys 2022: the city's noise-survey zone polygons,
-# via HRI's CKAN. Immutability is per RESOURCE: every source x metric
-# input pins its exact CKAN resource id, download URL, and sha256 —
-# captured once from the live dataset with
-# ``python -m pipeline.noise --discover`` and pasted here. The CKAN
-# API serves only as a drift alarm when a pinned id stops resolving.
-HRI_CKAN_URL = "https://hri.fi/data/api/3/action"
-NOISE_CKAN_PACKAGE = "helsingin-kaupungin-meluselvitys-2022"
-#: Entries of (source, metric, resource id, download URL, sha256).
-#: A SEQUENCE, not a mapping, so a duplicated source x metric entry is
-#: detectable and refused. Populated by the one-time --discover
-#: capture; an empty table makes the build refuse with the capture
-#: instructions.
-NOISE_RESOURCES: tuple = ()
+# Helsinki meluselvitys 2022: the city's noise-survey zone polygons
+# over the city's open WFS (HRI's dataset publishes the WMS/WFS
+# endpoints, no files — verified live 2026-08-19). The eight
+# source x metric layers are pinned by their exact 2022 type names;
+# a missing type name fails the run against the live capabilities.
+# The published attribute schema is numeric `db_lo`/`db_hi` per zone.
+NOISE_WFS_URL = "https://kartta.hel.fi/ws/geoserver/avoindata/wfs"
+NOISE_LAYERS = (
+    ("road", "Lden", "avoindata:Meluselvitys_2022_Helsinki_kadut_ja_maantiet_Lden"),
+    ("road", "Ln", "avoindata:Meluselvitys_2022_Helsinki_kadut_ja_maantiet_Ln"),
+    ("rail", "Lden", "avoindata:Meluselvitys_2022_Helsinki_rautatiet_Lden"),
+    ("rail", "Ln", "avoindata:Meluselvitys_2022_Helsinki_rautatiet_Ln"),
+    ("metro", "Lden", "avoindata:Meluselvitys_2022_Helsinki_metro_Lden"),
+    ("metro", "Ln", "avoindata:Meluselvitys_2022_Helsinki_metro_Ln"),
+    ("tram", "Lden", "avoindata:Meluselvitys_2022_Helsinki_raitiotie_Lden"),
+    ("tram", "Ln", "avoindata:Meluselvitys_2022_Helsinki_raitiotie_Ln"),
+)
 NOISE_SOURCES = ("road", "rail", "metro", "tram")
 NOISE_METRICS = ("Lden", "Ln")
 NOISE_ASSET = "helsinki_noise_2022.gpkg"
 NOISE_LICENSE = "CC BY 4.0"
 NOISE_ATTRIBUTION = "City of Helsinki, meluselvitys 2022"
-MAX_NOISE_RESOURCE_BYTES = 256 * 1024 * 1024
+#: One layer holds ~16k zone polygons (road Lden, observed live);
+#: the ceiling guards a runaway response, not a page size.
+MAX_NOISE_FEATURES = 200_000
+MAX_NOISE_RESPONSE_BYTES = 512 * 1024 * 1024

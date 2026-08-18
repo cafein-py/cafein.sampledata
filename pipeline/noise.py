@@ -1,125 +1,106 @@
 """The noise step: Helsinki's meluselvitys 2022 zone polygons as one
-GeoPackage.
+GeoPackage, over the city's open WFS.
 
-Immutability is per RESOURCE: every source x metric input pins its
-exact CKAN resource id, download URL, and sha256 in
-``config.NOISE_RESOURCES`` — captured once from the live dataset with
-``python -m pipeline.noise --discover`` — and the build verifies each
-download against its pin. The CKAN API serves only as a drift alarm
-when a pinned id stops resolving. Zones normalize to columns
-``source``/``metric``/``db_low``/``db_high`` (``db_high`` nullable —
-the open-ended top class), polygons in EPSG:3067.
+HRI's dataset publishes the WMS/WFS endpoints, not files, so the
+eight source x metric layers are pinned by their exact 2022 type
+names and fetched like the population grid: a hits request declares
+the count, one bounded GetFeature delivers the zones in EPSG:3067,
+and completeness and duplicate ids are verified before anything is
+published. The published schema carries numeric ``db_lo``/``db_hi``
+per zone; the asset normalizes to ``source``/``metric``/``db_low``/
+``db_high`` (``db_high`` nullable — an open-ended top class), the
+zone geometry unchanged.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import pathlib
+import re
 import shutil
 
 from pipeline import PipelineError, config, download, manifest, workdir_lock
 
 
-def package_url() -> str:
-    return f"{config.HRI_CKAN_URL}/package_show?id={config.NOISE_CKAN_PACKAGE}"
-
-
-def discover(work_dir) -> None:
-    """Print the live dataset's resources — id, url, sha256 after a
-    verification download — for pasting into ``NOISE_RESOURCES``."""
-    work_dir = pathlib.Path(work_dir)
-    run_dir = download.run_directory(work_dir)
-    try:
-        listing = run_dir / "package.json"
-        download.stream_download(
-            package_url(), listing, max_bytes=config.MAX_WFS_XML_BYTES
-        )
-        payload = json.loads(listing.read_text(encoding="utf-8"))
-        resources = payload.get("result", {}).get("resources", [])
-        if not resources:
-            raise PipelineError(
-                f"CKAN package {config.NOISE_CKAN_PACKAGE!r} lists no "
-                "resources — wrong package id?"
-            )
-        for resource in resources:
-            target = run_dir / "resource.bin"
-            download.stream_download(
-                resource["url"], target, max_bytes=config.MAX_NOISE_RESOURCE_BYTES
-            )
-            digest, size = manifest.file_digest(target)
-            print(
-                f"{resource['id']}  {resource.get('name', '?')!r}  "
-                f"{resource.get('format', '?')}  {size} bytes\n"
-                f"  url: {resource['url']}\n  sha256: {digest}"
-            )
-            target.unlink()
-    finally:
-        shutil.rmtree(run_dir, ignore_errors=True)
-
-
-def pinned_resources():
-    """The pin entries as a validated mapping: every source x metric
-    combo exactly once — a repeated entry is refused, never silently
-    overwritten (the config is a sequence for exactly this reason)."""
-    if not config.NOISE_RESOURCES:
-        raise PipelineError(
-            "NOISE_RESOURCES is uncaptured — run "
-            "`python -m pipeline.noise --discover <work_dir>` once (in an "
-            "environment that reaches hri.fi) and paste the pins into "
-            "pipeline/config.py"
-        )
-    pins = {}
-    for source, metric, resource_id, url, sha256 in config.NOISE_RESOURCES:
-        combo = (source, metric)
-        if combo in pins:
-            raise PipelineError(
-                f"NOISE_RESOURCES pins {combo} twice — missing or "
-                "duplicate source x metric combinations"
-            )
-        pins[combo] = (resource_id, url, sha256)
-    expected = {
-        (source, metric)
-        for source in config.NOISE_SOURCES
-        for metric in config.NOISE_METRICS
-    }
-    if set(pins) != expected:
-        raise PipelineError(
-            f"NOISE_RESOURCES covers {sorted(pins)}, expected exactly "
-            f"{sorted(expected)} — missing or duplicate source x metric "
-            "combinations"
-        )
-    return pins
-
-
-def alarm_on_drift(run_dir) -> None:
-    """A pinned resource id that no longer resolves fails the run with
-    the package's current listing — never a silent substitution."""
-    listing = run_dir / "package.json"
-    download.stream_download(
-        package_url(), listing, max_bytes=config.MAX_WFS_XML_BYTES
+def feature_url(layer, *, hits=False) -> str:
+    url = (
+        f"{config.NOISE_WFS_URL}?service=WFS&version=2.0.0&request=GetFeature"
+        f"&typeNames={layer}&srsName=EPSG:3067"
     )
-    payload = json.loads(listing.read_text(encoding="utf-8"))
-    live = {
-        resource["id"]: resource.get("name", "?")
-        for resource in payload.get("result", {}).get("resources", [])
-    }
-    missing = [
-        ((source, metric), pinned_id)
-        for source, metric, pinned_id, _, _ in config.NOISE_RESOURCES
-        if pinned_id not in live
-    ]
-    if missing:
+    if hits:
+        return url + "&resultType=hits"
+    return f"{url}&outputFormat=application/json&count={config.MAX_NOISE_FEATURES}"
+
+
+def matched_count(hits_xml: str, layer) -> int:
+    match = re.search(r'numberMatched="(\d+)"', hits_xml)
+    if not match:
         raise PipelineError(
-            f"pinned noise resources {missing} no longer exist in CKAN "
-            f"package {config.NOISE_CKAN_PACKAGE!r}; the dataset now "
-            f"lists {live} — re-verify and repin before publishing"
+            f"the WFS hits response for {layer} carries no numberMatched — "
+            "cannot verify the zones arrive complete (a renamed 2022 "
+            "layer?)"
         )
+    return int(match.group(1))
+
+
+def fetch_zones(layer, run_dir, name) -> pathlib.Path:
+    """One layer fetched complete and verified, the population-grid
+    pattern: hits first, one bounded request, count and id checks."""
+    hits = run_dir / f"{name}.hits.xml"
+    download.stream_download(
+        feature_url(layer, hits=True), hits, max_bytes=config.MAX_WFS_XML_BYTES
+    )
+    expected = matched_count(hits.read_text(encoding="utf-8", errors="replace"), layer)
+    if expected == 0:
+        raise PipelineError(f"{layer} declares zero zones — a wrong layer?")
+    if expected > config.MAX_NOISE_FEATURES:
+        raise PipelineError(
+            f"{layer} declares {expected} zones — implausible; refusing"
+        )
+    page = run_dir / f"{name}.json"
+    download.stream_download(
+        feature_url(layer), page, max_bytes=config.MAX_NOISE_RESPONSE_BYTES
+    )
+    payload = json.loads(page.read_text(encoding="utf-8"))
+    features = payload.get("features", [])
+    identifiers = set()
+    for feature in features:
+        identifier = feature.get("id")
+        if not identifier:
+            raise PipelineError(f"{layer}: a zone carries no id")
+        if identifier in identifiers:
+            raise PipelineError(f"{layer}: zone {identifier!r} delivered twice")
+        identifiers.add(identifier)
+        # Only here, on the raw JSON, is a NaN/Infinity literal still
+        # distinguishable from a genuine null — downstream both read
+        # as missing. Refuse it before it can pose as an open class.
+        properties = feature.get("properties") or {}
+        for key in ("db_lo", "db_hi"):
+            value = properties.get(key)
+            if isinstance(value, float) and not math.isfinite(value):
+                raise PipelineError(
+                    f"{layer}: zone {identifier!r} carries a non-finite "
+                    f"{key} literal — refusing"
+                )
+    declared = payload.get("numberMatched")
+    if declared is not None and declared != expected:
+        raise PipelineError(
+            f"{layer} changed mid-fetch (hits {expected}, response "
+            f"{declared}); re-run the step"
+        )
+    if len(features) != expected:
+        raise PipelineError(
+            f"{layer} delivered {len(features)} of {expected} zones; "
+            "refusing a partial layer"
+        )
+    return page
 
 
 def normalized_zones(fetched, out) -> pathlib.Path:
     """Every fetched source x metric layer into one GeoPackage with
-    the class-bound schema."""
+    the class-bound schema, geometry unchanged."""
     try:
         import geopandas
         import pandas
@@ -134,26 +115,55 @@ def normalized_zones(fetched, out) -> pathlib.Path:
         if zones.empty:
             raise PipelineError(f"{source} x {metric} carries no zones")
         if zones.geometry.isna().any() or zones.geometry.is_empty.any():
-            raise PipelineError(
-                f"{source} x {metric} carries null or empty geometries"
-            )
+            raise PipelineError(f"{source} x {metric} carries null or empty geometries")
         if not zones.geometry.geom_type.isin(["Polygon", "MultiPolygon"]).all():
             raise PipelineError(
                 f"{source} x {metric} carries non-polygon geometries "
-                f"({sorted(zones.geometry.geom_type.unique())}) — a "
-                "mislabeled resource?"
+                f"({sorted(zones.geometry.geom_type.unique())})"
             )
-        low, high = _class_bounds(zones, source, metric)
+        for column in ("db_lo", "db_hi"):
+            if column not in zones.columns:
+                raise PipelineError(
+                    f"{source} x {metric} has no {column!r} column "
+                    f"(columns: {sorted(zones.columns)}) — the published "
+                    "schema changed"
+                )
+        low = pandas.to_numeric(zones["db_lo"], errors="coerce")
+        raw_high = zones["db_hi"]
+        high = pandas.to_numeric(raw_high, errors="coerce")
+        if low.isna().any():
+            raise PipelineError(f"{source} x {metric}: non-numeric db_lo values")
+        # Null db_high means the open-ended top class — but only a
+        # genuinely null source value may say so. Any non-null value
+        # that does not parse ("70+", "", whitespace) must refuse,
+        # never silently publish as open-ended.
+        garbled = high.isna() & raw_high.notna()
+        if garbled.any():
+            values = sorted(raw_high[garbled].astype(str).unique())[:5]
+            raise PipelineError(
+                f"{source} x {metric}: non-numeric db_hi values "
+                f"{values!r} — refusing to publish them as open-ended "
+                "classes"
+            )
+        # JSON parsers admit Infinity/NaN literals: only FINITE bounds
+        # are publishable (a NaN db_lo is already caught above).
+        import numpy
+
+        if numpy.isinf(low).any() or numpy.isinf(high.fillna(0)).any():
+            raise PipelineError(f"{source} x {metric}: non-finite dB bounds — refusing")
+        # The requested features arrive in EPSG:3067; GeoServer's
+        # GeoJSON does not label the CRS reliably, so declare what was
+        # requested.
         frame = geopandas.GeoDataFrame(
             {
                 "source": source,
                 "metric": metric,
-                "db_low": low,
-                "db_high": high,
+                "db_low": low.astype("float64"),
+                "db_high": high.astype("Float64"),
             },
             geometry=zones.geometry,
-            crs=zones.crs,
-        ).to_crs("EPSG:3067")
+            crs=None,
+        ).set_crs("EPSG:3067", allow_override=True)
         frames.append(frame)
     merged = geopandas.GeoDataFrame(
         pandas.concat(frames, ignore_index=True), crs="EPSG:3067"
@@ -161,38 +171,6 @@ def normalized_zones(fetched, out) -> pathlib.Path:
     _validate_bounds(merged)
     merged.to_file(out, layer="noise_zones", driver="GPKG")
     return pathlib.Path(out)
-
-
-def _class_bounds(zones, source, metric):
-    """The dB class bounds from the published attribute — the exact
-    column and encoding are pinned here once the resources are; until
-    then this names what it found."""
-    candidates = [
-        column
-        for column in zones.columns
-        if column.lower() in ("db_lo", "db_low", "melutaso", "luokka", "db")
-    ]
-    if not candidates:
-        raise PipelineError(
-            f"{source} x {metric}: no recognised class column (columns: "
-            f"{sorted(zones.columns)}) — pin the schema after --discover"
-        )
-    import pandas
-
-    raw = zones[candidates[0]].astype(str).str.strip()
-    # The published classes read like "55-59" or ">= 70" / "yli 70".
-    bounds = raw.str.extract(r"^(?P<low>\d+)\s*-\s*(?P<high>\d+)$")
-    open_top = raw.str.extract(r"^(?:>=?|yli)\s*(?P<low>\d+)$")
-    low = pandas.to_numeric(bounds["low"]).fillna(pandas.to_numeric(open_top["low"]))
-    high = pandas.to_numeric(bounds["high"])
-    unparsed = raw[low.isna()]
-    if len(unparsed):
-        raise PipelineError(
-            f"{source} x {metric}: unparsed class values "
-            f"{sorted(unparsed.unique())[:5]!r} — pin the encoding after "
-            "--discover"
-        )
-    return low.astype("float64"), high.astype("float64")
 
 
 def _validate_bounds(merged) -> None:
@@ -211,37 +189,49 @@ def _validate_bounds(merged) -> None:
             )
 
 
+def pinned_layers():
+    """The layer table, validated complete: every source x metric
+    combo exactly once (the config is a sequence so duplicates are
+    detectable)."""
+    layers = {}
+    for source, metric, layer in config.NOISE_LAYERS:
+        combo = (source, metric)
+        if combo in layers:
+            raise PipelineError(
+                f"NOISE_LAYERS pins {combo} twice — missing or duplicate "
+                "source x metric combinations"
+            )
+        layers[combo] = layer
+    expected = {
+        (source, metric)
+        for source in config.NOISE_SOURCES
+        for metric in config.NOISE_METRICS
+    }
+    if set(layers) != expected:
+        raise PipelineError(
+            f"NOISE_LAYERS covers {sorted(layers)}, expected exactly "
+            f"{sorted(expected)}"
+        )
+    return layers
+
+
 def build(work_dir) -> dict:
     """Run the step; returns ``{asset name: manifest record}``."""
     work_dir = pathlib.Path(work_dir)
-    pins = pinned_resources()
+    layers = pinned_layers()
     with workdir_lock(work_dir):
         run_dir = download.run_directory(work_dir)
         try:
-            alarm_on_drift(run_dir)
             fetched = {}
-            for combo, (resource_id, url, sha256) in sorted(pins.items()):
-                target = run_dir / f"{combo[0]}_{combo[1]}"
-                download.stream_download(
-                    url, target, max_bytes=config.MAX_NOISE_RESOURCE_BYTES
-                )
-                digest, _ = manifest.file_digest(target)
-                if digest != sha256:
-                    raise PipelineError(
-                        f"noise resource {resource_id} ({combo}) hashes to "
-                        f"{digest}, pinned {sha256} — the published bytes "
-                        "changed; re-verify and repin"
-                    )
-                fetched[combo] = target
+            for combo, layer in sorted(layers.items()):
+                fetched[combo] = fetch_zones(layer, run_dir, f"{combo[0]}_{combo[1]}")
             out = download.staging_path(run_dir, config.NOISE_ASSET)
             normalized_zones(fetched, out)
-            identifiers = ", ".join(
-                pins[combo][0] for combo in sorted(pins)
-            )
+            names = ", ".join(layers[combo] for combo in sorted(layers))
             stamp = (
-                f"HRI {config.NOISE_CKAN_PACKAGE} resources {identifiers} "
-                f"fetched {_utcnow()}, sha256-pinned, zones normalized to "
-                "EPSG:3067"
+                f"kartta.hel.fi WFS layers {names} fetched {_utcnow()}, "
+                "zones normalized to source/metric/db_low/db_high in "
+                "EPSG:3067, geometry unchanged"
             )
             record = manifest.asset_record(
                 out,
@@ -271,13 +261,5 @@ def _utcnow() -> str:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("work_dir", help="directory for downloads and outputs")
-    parser.add_argument(
-        "--discover",
-        action="store_true",
-        help="print the live CKAN resources for pinning, then exit",
-    )
     arguments = parser.parse_args()
-    if arguments.discover:
-        discover(arguments.work_dir)
-    else:
-        print(build(arguments.work_dir))
+    print(build(arguments.work_dir))
