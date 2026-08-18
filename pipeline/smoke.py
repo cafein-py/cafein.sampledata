@@ -56,7 +56,7 @@ def check_exposure_assets(assets) -> None:
                 f"the air-quality raster carries {raster.count} bands, "
                 f"expected {len(config.AIR_QUALITY_BANDS)}"
             )
-        expected = [f"{name} [{unit}]" for name, unit in config.AIR_QUALITY_BANDS]
+        expected = [f"{name} [{unit}]" for name, _, unit in config.AIR_QUALITY_BANDS]
         if list(raster.descriptions) != expected:
             raise PipelineError(
                 f"air-quality band descriptions {raster.descriptions!r} != "
@@ -65,7 +65,9 @@ def check_exposure_assets(assets) -> None:
         require_overlap(
             tuple(raster.bounds), "the air-quality raster", (west, south, east, north)
         )
-        sample = raster.read(4, window=((0, min(200, raster.height)), (0, min(200, raster.width))))
+        sample = raster.read(
+            4, window=((0, min(200, raster.height)), (0, min(200, raster.width)))
+        )
         if (sample[sample == sample] < 0).any():
             raise PipelineError("negative PM10 concentrations in the sample")
 

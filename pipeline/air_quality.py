@@ -160,20 +160,31 @@ def write_cog(netcdf_path, out, valid_hour: datetime, origin: datetime):
             )
         origin_declared = _verify_origin(dataset, origin)
         hour = dataset.sel(time=numpy.datetime64(valid_hour.replace(tzinfo=None)))
+        by_base = {}
+        for variable in map(str, hour.data_vars):
+            by_base.setdefault(re.sub(r"_\d+$", "", variable), []).append(variable)
+        units_map = {
+            variable: str(hour[variable].attrs.get("units", ""))
+            for variable in map(str, hour.data_vars)
+        }
         bands = []
-        for name, unit in config.AIR_QUALITY_BANDS:
-            if name not in hour:
+        for name, source_name, unit in config.AIR_QUALITY_BANDS:
+            matches = by_base.get(source_name, [])
+            if len(matches) != 1:
                 raise PipelineError(
-                    f"the ENFUSER NetCDF carries no {name!r} variable "
-                    f"(variables: {sorted(hour.data_vars)})"
+                    f"expected exactly one {source_name!r} variable (the "
+                    f"FMI parameter-id suffix stripped), found {matches!r} "
+                    f"(variables with units: {units_map})"
                 )
-            declared = str(hour[name].attrs.get("units", "")).strip()
-            if declared and declared != unit:
+            variable = hour[matches[0]]
+            declared = str(variable.attrs.get("units", "")).strip()
+            if declared and _normalized_unit(declared) != _normalized_unit(unit):
                 raise PipelineError(
-                    f"{name} declares units {declared!r}, the pinned table "
-                    f"says {unit!r} — refusing a silent relabel"
+                    f"{matches[0]} declares units {declared!r}, the pinned "
+                    f"table says {unit!r} — refusing a silent relabel "
+                    f"(attrs: {dict(variable.attrs)})"
                 )
-            bands.append(hour[name].astype("float32"))
+            bands.append(variable.astype("float32"))
         stack = xarray.concat(bands, dim="band")
         stack = stack.assign_coords(
             band=list(range(1, len(config.AIR_QUALITY_BANDS) + 1))
@@ -220,11 +231,11 @@ def write_cog(netcdf_path, out, valid_hour: datetime, origin: datetime):
         # rioxarray writes a list-valued long_name as per-band
         # descriptions; the COG driver refuses post-write edits.
         stack.attrs["long_name"] = [
-            f"{name} [{unit}]" for name, unit in config.AIR_QUALITY_BANDS
+            f"{name} [{unit}]" for name, _, unit in config.AIR_QUALITY_BANDS
         ]
         negatives = [
             name
-            for (name, _), band in zip(config.AIR_QUALITY_BANDS, bands)
+            for (name, _, _), band in zip(config.AIR_QUALITY_BANDS, bands)
             if name != "AQIndex" and float(band.min()) < 0
         ]
         if negatives:
@@ -242,6 +253,22 @@ def write_cog(netcdf_path, out, valid_hour: datetime, origin: datetime):
         else "bound by the validated download reference"
     )
     return pathlib.Path(out), binding
+
+
+def _normalized_unit(text) -> str:
+    """CF spelling variants of one physical unit collapse to one form
+    ('µg m-3', 'ug/m3', 'ug.m-3'); a real mismatch (mg vs ug) still
+    differs."""
+    unit = str(text).strip().lower()
+    for source, target in (("µ", "u"), ("³", "3"), ("²", "2")):
+        unit = unit.replace(source, target)
+    for gone in (" ", ".", "*"):
+        unit = unit.replace(gone, "")
+    unit = unit.replace("cm-3", "/cm3")
+    unit = unit.replace("m-3", "/m3")
+    if unit.startswith("/"):
+        unit = "1" + unit
+    return unit
 
 
 def _verify_origin(dataset, origin) -> bool:
