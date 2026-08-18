@@ -18,12 +18,7 @@ for the calendar.
    weekday), and the ENFUSER valid hour (an ISO instant like
    `2026-08-18T06:00:00Z`; recent hours only — the open WFS serves
    near-real-time and forecast, not an archive). Requires the
-   `MML_API_KEY` repository secret. The noise step additionally
-   requires the one-time resource pins in `pipeline/config.py`
-   (`NOISE_RESOURCES`) — capture them once with
-   `python -m pipeline.noise --discover <work_dir>` from a machine
-   that reaches hri.fi, and refresh them only when HRI republishes
-   the dataset.
+   `MML_API_KEY` repository secret.
 2. The workflow fetches the sources, validates the feed with transitio,
    smoke-tests every asset through cafein, and attaches the assets plus
    `manifest.json`, the validation report, `LICENSES.txt`, and release

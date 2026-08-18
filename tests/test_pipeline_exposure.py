@@ -54,9 +54,7 @@ def test_no_covering_origin_is_refused():
 
 
 def test_an_unbound_reference_is_refused():
-    pairs = air_quality.member_references(
-        response_xml(4, valid="2026-08-18T09:00:00Z")
-    )
+    pairs = air_quality.member_references(response_xml(4, valid="2026-08-18T09:00:00Z"))
     with pytest.raises(PipelineError, match="unbound download"):
         air_quality.select_reference(pairs, instant(6))
 
@@ -106,9 +104,7 @@ def synthetic_netcdf(path, hours=(6,), origin_hour=None):
 def test_the_netcdf_slices_to_the_requested_hour(tmp_path):
     pytest.importorskip("rioxarray")
     rasterio = pytest.importorskip("rasterio")
-    source = synthetic_netcdf(
-        tmp_path / "multi.nc", hours=(4, 6, 8), origin_hour=4
-    )
+    source = synthetic_netcdf(tmp_path / "multi.nc", hours=(4, 6, 8), origin_hour=4)
     out = tmp_path / "out.tif"
     air_quality.write_cog(source, out, instant(6), instant(4))
     with rasterio.open(out) as raster:
@@ -258,76 +254,162 @@ def test_a_partial_layer_is_refused(tmp_path):
 # --- noise -------------------------------------------------------------------
 
 
-def test_uncaptured_pins_refuse_with_instructions(monkeypatch):
-    monkeypatch.setattr(config, "NOISE_RESOURCES", {})
-    with pytest.raises(PipelineError, match="--discover"):
-        noise.pinned_resources()
-
-
-def test_incomplete_pins_are_refused(monkeypatch):
-    monkeypatch.setattr(
-        config,
-        "NOISE_RESOURCES",
-        (("road", "Lden", "id", "https://example.invalid/x", "0" * 64),),
-    )
-    with pytest.raises(PipelineError, match="missing or duplicate"):
-        noise.pinned_resources()
-
-
-def test_duplicate_pins_are_refused(monkeypatch):
-    entry = ("road", "Lden", "id", "https://example.invalid/x", "0" * 64)
-    monkeypatch.setattr(config, "NOISE_RESOURCES", (entry, entry))
+def test_pinned_layers_validate_the_full_grid(monkeypatch):
+    layers = noise.pinned_layers()
+    assert set(layers) == {
+        (source, metric)
+        for source in config.NOISE_SOURCES
+        for metric in config.NOISE_METRICS
+    }
+    entry = config.NOISE_LAYERS[0]
+    monkeypatch.setattr(config, "NOISE_LAYERS", (entry, entry))
     with pytest.raises(PipelineError, match="twice"):
-        noise.pinned_resources()
+        noise.pinned_layers()
+    monkeypatch.setattr(config, "NOISE_LAYERS", (entry,))
+    with pytest.raises(PipelineError, match="expected exactly"):
+        noise.pinned_layers()
 
 
-def test_class_bounds_parse_ranges_and_open_tops():
-    geopandas = pytest.importorskip("geopandas")
-    from shapely.geometry import Polygon
+def test_hits_and_completeness_guard_the_fetch(tmp_path, monkeypatch):
+    assert noise.matched_count('x numberMatched="16125" y', "layer") == 16125
+    with pytest.raises(PipelineError, match="no numberMatched"):
+        noise.matched_count("<no/>", "layer")
 
-    square = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
-    zones = geopandas.GeoDataFrame(
-        {"db_lo": ["55-59", "60-64", ">= 70"]},
-        geometry=[square] * 3,
-        crs="EPSG:3879",
-    )
-    low, high = noise._class_bounds(zones, "road", "Lden")
-    assert list(low) == [55.0, 60.0, 70.0]
-    assert list(high[:2]) == [59.0, 64.0]
-    assert high.isna().iloc[2]
-
-
-def test_unparsed_classes_are_refused():
-    geopandas = pytest.importorskip("geopandas")
-    from shapely.geometry import Polygon
-
-    square = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
-    zones = geopandas.GeoDataFrame(
-        {"db_lo": ["loud"]}, geometry=[square], crs="EPSG:3879"
-    )
-    with pytest.raises(PipelineError, match="unparsed class values"):
-        noise._class_bounds(zones, "road", "Lden")
-
-
-def test_bounds_validation_rejects_a_misplaced_open_class():
-    geopandas = pytest.importorskip("geopandas")
-    pandas = pytest.importorskip("pandas")
-    from shapely.geometry import Polygon
-
-    square = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
-    merged = geopandas.GeoDataFrame(
-        {
-            "source": ["road", "road"],
-            "metric": ["Lden", "Lden"],
-            "db_low": [55.0, 70.0],
-            "db_high": [pandas.NA, 74.0],
+    responses = {
+        "hits": 'numberMatched="2"',
+        "page": {
+            "numberMatched": 2,
+            "features": [
+                {"id": "a", "properties": {}},
+                {"id": "a", "properties": {}},
+            ],
         },
-        geometry=[square] * 2,
-        crs="EPSG:3067",
+    }
+
+    def fake_download(url, target, max_bytes=None):
+        if "resultType=hits" in url:
+            target.write_text(responses["hits"], encoding="utf-8")
+        else:
+            import json as json_module
+
+            target.write_text(json_module.dumps(responses["page"]), encoding="utf-8")
+
+    monkeypatch.setattr(noise.download, "stream_download", fake_download)
+    with pytest.raises(PipelineError, match="delivered twice"):
+        noise.fetch_zones("layer", tmp_path, "road_Lden")
+    responses["page"]["features"] = [{"id": "a", "properties": {}}]
+    with pytest.raises(PipelineError, match="delivered 1 of 2"):
+        noise.fetch_zones("layer", tmp_path, "road_Lden2")
+    responses["hits"] = 'numberMatched="1"'
+    responses["page"]["numberMatched"] = 1
+    responses["page"]["features"] = [
+        {"id": "a", "properties": {"db_lo": 70, "db_hi": float("nan")}}
+    ]
+    with pytest.raises(PipelineError, match="non-finite db_hi"):
+        noise.fetch_zones("layer", tmp_path, "road_Lden3")
+
+
+def _zone_frame(tmp_path, name, rows, driver="GeoJSON"):
+    geopandas = pytest.importorskip("geopandas")
+    from shapely.geometry import Polygon
+
+    square = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    frame = geopandas.GeoDataFrame(rows, geometry=[square] * len(rows["db_lo"]))
+    suffix = "gpkg" if driver == "GPKG" else "json"
+    path = tmp_path / f"{name}.{suffix}"
+    frame.to_file(path, driver=driver)
+    return path
+
+
+def test_zones_normalize_with_the_numeric_schema(tmp_path):
+    geopandas = pytest.importorskip("geopandas")
+    fetched = {}
+    for source in config.NOISE_SOURCES:
+        for metric in config.NOISE_METRICS:
+            fetched[(source, metric)] = _zone_frame(
+                tmp_path,
+                f"{source}_{metric}",
+                {"db_lo": [45, 70], "db_hi": [50, None]},
+            )
+    out = tmp_path / "noise.gpkg"
+    noise.normalized_zones(fetched, out)
+    zones = geopandas.read_file(out)
+    assert list(zones.columns) == [
+        "source",
+        "metric",
+        "db_low",
+        "db_high",
+        "geometry",
+    ]
+    assert str(zones.crs).upper() == "EPSG:3067"
+    assert len(zones) == 16
+    top = zones[zones["db_high"].isna()]
+    assert (top["db_low"] == 70).all()
+
+
+def test_a_garbled_db_hi_is_refused_not_published_as_open(tmp_path):
+    fetched = {
+        (source, metric): _zone_frame(
+            tmp_path, f"{source}_{metric}", {"db_lo": [45], "db_hi": [50]}
+        )
+        for source in config.NOISE_SOURCES
+        for metric in config.NOISE_METRICS
+    }
+    fetched[("road", "Lden")] = _zone_frame(
+        tmp_path, "garbled", {"db_lo": [70], "db_hi": ["70+"]}
     )
-    merged["db_high"] = merged["db_high"].astype("Float64")
+    with pytest.raises(PipelineError, match="non-numeric db_hi"):
+        noise.normalized_zones(fetched, tmp_path / "out.gpkg")
+    fetched[("road", "Lden")] = _zone_frame(
+        tmp_path, "blank", {"db_lo": [70], "db_hi": [" "]}
+    )
+    with pytest.raises(PipelineError, match="non-numeric db_hi"):
+        noise.normalized_zones(fetched, tmp_path / "out2.gpkg")
+
+
+def test_non_finite_bounds_are_refused(tmp_path):
+    fetched = {
+        (source, metric): _zone_frame(
+            tmp_path, f"{source}_{metric}", {"db_lo": [45], "db_hi": [50]}
+        )
+        for source in config.NOISE_SOURCES
+        for metric in config.NOISE_METRICS
+    }
+    # GeoJSON cannot carry inf; GPKG stores real floats.
+    fetched[("road", "Lden")] = _zone_frame(
+        tmp_path, "infinite", {"db_lo": [70.0], "db_hi": [float("inf")]}, driver="GPKG"
+    )
+    with pytest.raises(PipelineError, match="non-finite"):
+        noise.normalized_zones(fetched, tmp_path / "out.gpkg")
+
+
+def test_a_missing_schema_column_is_refused(tmp_path):
+    fetched = {
+        (source, metric): _zone_frame(
+            tmp_path, f"{source}_{metric}", {"db_lo": [45], "db_hi": [50]}
+        )
+        for source in config.NOISE_SOURCES
+        for metric in config.NOISE_METRICS
+    }
+    broken = _zone_frame(tmp_path, "broken", {"db_lo": [45], "melu": [50]})
+    fetched[("road", "Lden")] = broken
+    with pytest.raises(PipelineError, match="db_hi"):
+        noise.normalized_zones(fetched, tmp_path / "out.gpkg")
+
+
+def test_a_misplaced_open_class_is_refused(tmp_path):
+    fetched = {
+        (source, metric): _zone_frame(
+            tmp_path, f"{source}_{metric}", {"db_lo": [45], "db_hi": [50]}
+        )
+        for source in config.NOISE_SOURCES
+        for metric in config.NOISE_METRICS
+    }
+    fetched[("road", "Lden")] = _zone_frame(
+        tmp_path, "misplaced", {"db_lo": [55, 70], "db_hi": [None, 74]}
+    )
     with pytest.raises(PipelineError, match="outside the top"):
-        noise._validate_bounds(merged)
+        noise.normalized_zones(fetched, tmp_path / "out.gpkg")
 
 
 def test_a_redirected_or_malformed_reference_is_refused():
