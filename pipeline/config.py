@@ -41,6 +41,12 @@ TOLERATED_GTFS_NOTICES = frozenset(
 # Sources are hundreds of megabytes; allow slow mirrors before giving up.
 DOWNLOAD_TIMEOUT = 300.0
 
+# An honest identifying agent for endpoints that refuse urllib's
+# default (the Elsevier CDN 403s it).
+DOWNLOAD_USER_AGENT = (
+    "cafein-sampledata-pipeline (+https://github.com/cafein-py/cafein.sampledata)"
+)
+
 # The largest source is the Finland extract (~600 MB); anything past
 # this cap is a misbehaving endpoint, aborted before it fills the disk.
 # Smaller endpoints get correspondingly smaller caps at their call

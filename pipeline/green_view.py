@@ -23,8 +23,13 @@ from pipeline import PipelineError, config, download, manifest, workdir_lock
 def verified_supplement(url, expected_sha256, run_dir, name) -> pathlib.Path:
     """Download one supplement archive and verify its pinned bytes."""
     archive = run_dir / name
+    # The publisher's CDN 403s urllib's default agent; identify
+    # honestly. The bytes stay pinned below either way.
     download.stream_download(
-        url, archive, max_bytes=config.MAX_GREEN_VIEW_ZIP_BYTES
+        url,
+        archive,
+        max_bytes=config.MAX_GREEN_VIEW_ZIP_BYTES,
+        headers={"User-Agent": config.DOWNLOAD_USER_AGENT},
     )
     digest, _ = manifest.file_digest(archive)
     if digest != expected_sha256:
@@ -56,8 +61,7 @@ def normalized_layers(points_path, roads_path, out) -> pathlib.Path:
         import geopandas
     except ImportError as error:
         raise PipelineError(
-            "the green view step needs geopandas (see "
-            "pipeline/environment.yaml)"
+            "the green view step needs geopandas (see " "pipeline/environment.yaml)"
         ) from error
 
     points = geopandas.read_file(points_path)
@@ -111,8 +115,8 @@ def build(work_dir) -> dict:
     with workdir_lock(work_dir):
         run_dir = download.run_directory(work_dir)
         try:
-            (points_url, points_sha, points_member) = config.GREEN_VIEW_SUPPLEMENTS[0]
-            (roads_url, roads_sha, roads_member) = config.GREEN_VIEW_SUPPLEMENTS[1]
+            points_url, points_sha, points_member = config.GREEN_VIEW_SUPPLEMENTS[0]
+            roads_url, roads_sha, roads_member = config.GREEN_VIEW_SUPPLEMENTS[1]
             points_zip = verified_supplement(
                 points_url, points_sha, run_dir, "mmc2.zip"
             )

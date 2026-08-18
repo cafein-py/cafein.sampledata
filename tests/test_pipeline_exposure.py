@@ -249,7 +249,10 @@ def test_a_drifted_supplement_hash_is_refused(tmp_path, monkeypatch):
     with zipfile.ZipFile(archive, "w") as bundle:
         bundle.writestr("greenery_points.gpkg", b"not the published bytes")
 
-    def fake_download(url, target, max_bytes=None):
+    seen = {}
+
+    def fake_download(url, target, max_bytes=None, headers=None):
+        seen["headers"] = headers
         target.write_bytes(archive.read_bytes())
 
     monkeypatch.setattr(green_view.download, "stream_download", fake_download)
@@ -257,6 +260,7 @@ def test_a_drifted_supplement_hash_is_refused(tmp_path, monkeypatch):
         green_view.verified_supplement(
             "https://example.invalid/mmc2.zip", "0" * 64, tmp_path, "mmc2.zip"
         )
+    assert seen["headers"] == {"User-Agent": config.DOWNLOAD_USER_AGENT}
 
 
 def test_an_unexpected_archive_member_is_refused(tmp_path):
