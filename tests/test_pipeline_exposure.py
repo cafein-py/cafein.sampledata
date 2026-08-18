@@ -80,9 +80,11 @@ def synthetic_netcdf(path, hours=(6,), origin_hour=None):
     xarray = pytest.importorskip("xarray")
     times = [numpy.datetime64(f"2026-08-18T{hour:02d}:00:00") for hour in hours]
     data = {}
-    for name, unit in config.AIR_QUALITY_BANDS:
+    # Live FMI naming: the variable is the base name plus a numeric
+    # parameter-id suffix, e.g. index_of_airquality_194.
+    for index, (_, source_name, unit) in enumerate(config.AIR_QUALITY_BANDS):
         values = numpy.full((len(times), 4, 5), 3.5, dtype="float32")
-        data[name] = xarray.DataArray(
+        data[f"{source_name}_{100 + index}"] = xarray.DataArray(
             values,
             dims=("time", "lat", "lon"),
             attrs={"units": unit},
@@ -109,7 +111,7 @@ def test_the_netcdf_slices_to_the_requested_hour(tmp_path):
     air_quality.write_cog(source, out, instant(6), instant(4))
     with rasterio.open(out) as raster:
         assert raster.count == len(config.AIR_QUALITY_BANDS)
-        expected = [f"{name} [{unit}]" for name, unit in config.AIR_QUALITY_BANDS]
+        expected = [f"{name} [{unit}]" for name, _, unit in config.AIR_QUALITY_BANDS]
         assert list(raster.descriptions) == expected
         assert raster.crs.to_epsg() == 4326
 
@@ -121,16 +123,62 @@ def test_a_netcdf_without_the_hour_is_refused(tmp_path):
         air_quality.write_cog(source, tmp_path / "out.tif", instant(6), instant(4))
 
 
+def _band_variable(dataset, base_name):
+    (match,) = [
+        name for name in map(str, dataset.data_vars) if name.startswith(base_name)
+    ]
+    return match
+
+
 def test_a_unit_mismatch_is_refused(tmp_path):
     pytest.importorskip("rioxarray")
     xarray = pytest.importorskip("xarray")
     source = synthetic_netcdf(tmp_path / "units.nc", hours=(6,), origin_hour=4)
     dataset = xarray.open_dataset(source)
-    dataset["PM10Concentration"].attrs["units"] = "mg/m3"
+    pm10 = _band_variable(dataset, "mass_concentration_of_pm10")
+    dataset[pm10].attrs["units"] = "mg/m3"
     rewritten = tmp_path / "bad_units.nc"
     dataset.to_netcdf(rewritten)
     dataset.close()
     with pytest.raises(PipelineError, match="silent relabel"):
+        air_quality.write_cog(rewritten, tmp_path / "out.tif", instant(6), instant(4))
+
+
+def test_cf_unit_spellings_collapse():
+    assert air_quality._normalized_unit("µg m-3") == "ug/m3"
+    assert air_quality._normalized_unit("ug.m-3") == "ug/m3"
+    assert air_quality._normalized_unit("um2 cm-3") == "um2/cm3"
+    assert air_quality._normalized_unit("cm-3") == "1/cm3"
+    assert air_quality._normalized_unit("1/cm3") == "1/cm3"
+    assert air_quality._normalized_unit("mg/m3") != air_quality._normalized_unit(
+        "ug/m3"
+    )
+
+
+def test_an_equivalent_cf_unit_spelling_passes(tmp_path):
+    pytest.importorskip("rioxarray")
+    xarray = pytest.importorskip("xarray")
+    source = synthetic_netcdf(tmp_path / "cf.nc", hours=(6,), origin_hour=4)
+    dataset = xarray.open_dataset(source)
+    no2 = _band_variable(dataset, "mass_concentration_of_nitrogen_dioxide")
+    dataset[no2].attrs["units"] = "µg m-3"
+    rewritten = tmp_path / "cf_units.nc"
+    dataset.to_netcdf(rewritten)
+    dataset.close()
+    air_quality.write_cog(rewritten, tmp_path / "out.tif", instant(6), instant(4))
+
+
+def test_an_ambiguous_band_match_is_refused(tmp_path):
+    pytest.importorskip("rioxarray")
+    xarray = pytest.importorskip("xarray")
+    source = synthetic_netcdf(tmp_path / "dup.nc", hours=(6,), origin_hour=4)
+    dataset = xarray.open_dataset(source)
+    aqi = _band_variable(dataset, "index_of_airquality")
+    dataset["index_of_airquality_999"] = dataset[aqi].copy()
+    rewritten = tmp_path / "dup_bands.nc"
+    dataset.to_netcdf(rewritten)
+    dataset.close()
+    with pytest.raises(PipelineError, match="exactly one"):
         air_quality.write_cog(rewritten, tmp_path / "out.tif", instant(6), instant(4))
 
 

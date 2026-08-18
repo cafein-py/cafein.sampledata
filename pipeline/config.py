@@ -188,25 +188,38 @@ POI_ASSETS = {category: poi_asset(category) for category in POI_CATEGORIES}
 # (a workflow input); the pipeline selects the freshest model origin at
 # or before it and binds the download to both instants.
 FMI_WFS_URL = "https://opendata.fmi.fi/wfs"
-ENFUSER_STORED_QUERY = (
-    "fmi::forecast::enfuser::airquality::helsinki-metropolitan::grid"
-)
+ENFUSER_STORED_QUERY = "fmi::forecast::enfuser::airquality::helsinki-metropolitan::grid"
 ENFUSER_DOWNLOAD_HOST = "opendata.fmi.fi"
 AIR_QUALITY_ASSET = "helsinki_air_quality.tif"
 AIR_QUALITY_LICENSE = "CC BY 4.0"
 AIR_QUALITY_ATTRIBUTION = "Finnish Meteorological Institute, FMI-ENFUSER"
-#: Band order and units, exactly as FMI names the NetCDF variables.
-#: Values pass through unchanged; the writer verifies each variable's
-#: own unit attribute against this table and refuses a mismatch.
+#: Band order: the published band name, the live NetCDF variable's
+#: base name (FMI appends a numeric parameter id — e.g.
+#: ``index_of_airquality_194`` — which the writer strips before
+#: matching), and the pinned unit. Values pass through unchanged; the
+#: writer verifies each variable's own unit attribute against this
+#: table (CF spelling variants collapsed) and refuses a mismatch.
 AIR_QUALITY_BANDS = (
-    ("AQIndex", "1"),
-    ("NO2Concentration", "ug/m3"),
-    ("O3Concentration", "ug/m3"),
-    ("PM10Concentration", "ug/m3"),
-    ("PM25Concentration", "ug/m3"),
-    ("LungDepositedSurfaceArea", "um2/cm3"),
-    ("BlackCarbonConcentration", "ug/m3"),
-    ("ParticleNumberConcentration", "1/cm3"),
+    ("AQIndex", "index_of_airquality", "1"),
+    (
+        "NO2Concentration",
+        "mass_concentration_of_nitrogen_dioxide_in_air",
+        "ug/m3",
+    ),
+    ("O3Concentration", "mass_concentration_of_ozone_in_air", "ug/m3"),
+    (
+        "PM10Concentration",
+        "mass_concentration_of_pm10_ambient_aerosol_in_air",
+        "ug/m3",
+    ),
+    (
+        "PM25Concentration",
+        "mass_concentration_of_pm2p5_ambient_aerosol_in_air",
+        "ug/m3",
+    ),
+    ("LungDepositedSurfaceArea", "LungDepositedSurfaceArea", "um2/cm3"),
+    ("BlackCarbonConcentration", "BlackCarbonConcentration", "ug/m3"),
+    ("ParticleNumberConcentration", "ParticleNumberConcentration", "1/cm3"),
 )
 MAX_ENFUSER_NETCDF_BYTES = 512 * 1024 * 1024
 
