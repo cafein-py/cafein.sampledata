@@ -179,3 +179,85 @@ def poi_asset(category) -> str:
 
 
 POI_ASSETS = {category: poi_asset(category) for category in POI_CATEGORIES}
+
+
+# --- Exposure layers (air quality, green view, noise) -------------------------
+
+# FMI ENFUSER: hourly ~13 m air-quality grids for the Helsinki
+# metropolitan area over the open WFS. The release pins one VALID hour
+# (a workflow input); the pipeline selects the freshest model origin at
+# or before it and binds the download to both instants.
+FMI_WFS_URL = "https://opendata.fmi.fi/wfs"
+ENFUSER_STORED_QUERY = (
+    "fmi::forecast::enfuser::airquality::helsinki-metropolitan::grid"
+)
+ENFUSER_DOWNLOAD_HOST = "opendata.fmi.fi"
+AIR_QUALITY_ASSET = "helsinki_air_quality.tif"
+AIR_QUALITY_LICENSE = "CC BY 4.0"
+AIR_QUALITY_ATTRIBUTION = "Finnish Meteorological Institute, FMI-ENFUSER"
+#: Band order and units, exactly as FMI names the NetCDF variables.
+#: Values pass through unchanged; the writer verifies each variable's
+#: own unit attribute against this table and refuses a mismatch.
+AIR_QUALITY_BANDS = (
+    ("AQIndex", "1"),
+    ("NO2Concentration", "ug/m3"),
+    ("O3Concentration", "ug/m3"),
+    ("PM10Concentration", "ug/m3"),
+    ("PM25Concentration", "ug/m3"),
+    ("LungDepositedSurfaceArea", "um2/cm3"),
+    ("BlackCarbonConcentration", "ug/m3"),
+    ("ParticleNumberConcentration", "1/cm3"),
+)
+MAX_ENFUSER_NETCDF_BYTES = 512 * 1024 * 1024
+
+# The green view dataset for the Finnish capital region (Data in
+# Brief, article S2352340920304959): street-level visible greenery
+# from Google Street View panoramas via semantic segmentation. The
+# publisher's supplement files are immutable published bytes, pinned
+# by sha256.
+GREEN_VIEW_SUPPLEMENTS = (
+    (
+        "https://ars.els-cdn.com/content/image/1-s2.0-S2352340920304959-mmc2.zip",
+        "330e215a8d8479212953338fe4daf355618900b647c2265da73696d57f7b12ce",
+        "greenery_points.gpkg",
+    ),
+    (
+        "https://ars.els-cdn.com/content/image/1-s2.0-S2352340920304959-mmc3.zip",
+        "8b591f4168904c84889761ee0cb5bec784359c5dc6b97954f048a60f262be191",
+        "greenery_roads.gpkg",
+    ),
+)
+GREEN_VIEW_ASSET = "helsinki_green_view.gpkg"
+GREEN_VIEW_LICENSE = "CC BY 4.0"
+GREEN_VIEW_ATTRIBUTION = (
+    "Akseli Toikka, Elias Willberg, Ville Mäkinen, Tuuli Toivonen & "
+    "Juha Oksanen: The green view dataset for the capital of Finland, "
+    "Helsinki. Data in Brief 30 (2020) 105601, "
+    "doi:10.1016/j.dib.2020.105601"
+)
+#: The published layers' pinned shapes: feature counts guard a partial
+#: or substituted supplement beyond the byte hash.
+GREEN_VIEW_POINT_COUNT = 92126
+GREEN_VIEW_ROAD_COUNT = 56074
+MAX_GREEN_VIEW_ZIP_BYTES = 64 * 1024 * 1024
+
+# Helsinki meluselvitys 2022: the city's noise-survey zone polygons,
+# via HRI's CKAN. Immutability is per RESOURCE: every source x metric
+# input pins its exact CKAN resource id, download URL, and sha256 —
+# captured once from the live dataset with
+# ``python -m pipeline.noise --discover`` and pasted here. The CKAN
+# API serves only as a drift alarm when a pinned id stops resolving.
+HRI_CKAN_URL = "https://hri.fi/data/api/3/action"
+NOISE_CKAN_PACKAGE = "helsingin-kaupungin-meluselvitys-2022"
+#: Entries of (source, metric, resource id, download URL, sha256).
+#: A SEQUENCE, not a mapping, so a duplicated source x metric entry is
+#: detectable and refused. Populated by the one-time --discover
+#: capture; an empty table makes the build refuse with the capture
+#: instructions.
+NOISE_RESOURCES: tuple = ()
+NOISE_SOURCES = ("road", "rail", "metro", "tram")
+NOISE_METRICS = ("Lden", "Ln")
+NOISE_ASSET = "helsinki_noise_2022.gpkg"
+NOISE_LICENSE = "CC BY 4.0"
+NOISE_ATTRIBUTION = "City of Helsinki, meluselvitys 2022"
+MAX_NOISE_RESOURCE_BYTES = 256 * 1024 * 1024

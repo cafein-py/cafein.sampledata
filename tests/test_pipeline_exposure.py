@@ -1,0 +1,414 @@
+"""Offline tests for the exposure steps: air quality, green view, noise."""
+
+import datetime
+import zipfile
+
+import pytest
+
+from pipeline import PipelineError, air_quality, config, green_view, noise
+
+UTC = datetime.timezone.utc
+
+
+# --- air quality -------------------------------------------------------------
+
+
+def instant(hour):
+    return datetime.datetime(2026, 8, 18, hour, tzinfo=UTC)
+
+
+def reference(origin_hour, valid="2026-08-18T06:00:00Z"):
+    return (
+        "https://opendata.fmi.fi/download?"
+        "producer=enfuser_helsinki_metropolitan&amp;param=AQIndex"
+        f"&amp;origintime=2026-08-18T{origin_hour:02d}:00:00Z"
+        f"&amp;starttime={valid}&amp;endtime={valid}&amp;format=netcdf"
+    )
+
+
+def response_xml(*origin_hours, valid="2026-08-18T06:00:00Z"):
+    members = "".join(
+        f"<gml:fileReference>{reference(hour, valid)}</gml:fileReference>"
+        for hour in origin_hours
+    )
+    return f"<wfs:FeatureCollection>{members}</wfs:FeatureCollection>"
+
+
+def test_member_references_parse_and_unescape():
+    pairs = air_quality.member_references(response_xml(4, 6))
+    assert [origin.hour for origin, _ in pairs] == [4, 6]
+    assert all("&amp;" not in ref for _, ref in pairs)
+
+
+def test_the_freshest_covering_origin_wins():
+    pairs = air_quality.member_references(response_xml(2, 4, 6, 8))
+    origin, ref = air_quality.select_reference(pairs, instant(6))
+    assert origin == instant(6)
+    assert "origintime=2026-08-18T06:00:00Z" in ref
+
+
+def test_no_covering_origin_is_refused():
+    pairs = air_quality.member_references(response_xml(8, 10))
+    with pytest.raises(PipelineError, match="no ENFUSER model origin"):
+        air_quality.select_reference(pairs, instant(6))
+
+
+def test_an_unbound_reference_is_refused():
+    pairs = air_quality.member_references(
+        response_xml(4, valid="2026-08-18T09:00:00Z")
+    )
+    with pytest.raises(PipelineError, match="unbound download"):
+        air_quality.select_reference(pairs, instant(6))
+
+
+def test_a_reference_without_an_origin_is_refused():
+    xml = (
+        "<gml:fileReference>https://opendata.fmi.fi/download?"
+        "producer=x</gml:fileReference>"
+    )
+    with pytest.raises(PipelineError, match="no origintime"):
+        air_quality.member_references(xml)
+
+
+def test_hours_must_be_whole_and_zoned():
+    with pytest.raises(PipelineError, match="timezone"):
+        air_quality.parse_instant("2026-08-18T06:00:00")
+    with pytest.raises(PipelineError, match="whole hour"):
+        air_quality.parse_instant("2026-08-18T06:30:00Z")
+
+
+def synthetic_netcdf(path, hours=(6,), origin_hour=None):
+    numpy = pytest.importorskip("numpy")
+    xarray = pytest.importorskip("xarray")
+    times = [numpy.datetime64(f"2026-08-18T{hour:02d}:00:00") for hour in hours]
+    data = {}
+    for name, unit in config.AIR_QUALITY_BANDS:
+        values = numpy.full((len(times), 4, 5), 3.5, dtype="float32")
+        data[name] = xarray.DataArray(
+            values,
+            dims=("time", "lat", "lon"),
+            attrs={"units": unit},
+        )
+    dataset = xarray.Dataset(
+        data,
+        coords={
+            "time": times,
+            "lat": numpy.linspace(60.14, 60.36, 4),
+            "lon": numpy.linspace(24.6, 25.19, 5),
+        },
+    )
+    if origin_hour is not None:
+        dataset.attrs["origintime"] = f"2026-08-18T{origin_hour:02d}:00:00Z"
+    dataset.to_netcdf(path)
+    return path
+
+
+def test_the_netcdf_slices_to_the_requested_hour(tmp_path):
+    pytest.importorskip("rioxarray")
+    rasterio = pytest.importorskip("rasterio")
+    source = synthetic_netcdf(
+        tmp_path / "multi.nc", hours=(4, 6, 8), origin_hour=4
+    )
+    out = tmp_path / "out.tif"
+    air_quality.write_cog(source, out, instant(6), instant(4))
+    with rasterio.open(out) as raster:
+        assert raster.count == len(config.AIR_QUALITY_BANDS)
+        expected = [f"{name} [{unit}]" for name, unit in config.AIR_QUALITY_BANDS]
+        assert list(raster.descriptions) == expected
+        assert raster.crs.to_epsg() == 4326
+
+
+def test_a_netcdf_without_the_hour_is_refused(tmp_path):
+    pytest.importorskip("rioxarray")
+    source = synthetic_netcdf(tmp_path / "wrong.nc", hours=(8,), origin_hour=4)
+    with pytest.raises(PipelineError, match="not the requested"):
+        air_quality.write_cog(source, tmp_path / "out.tif", instant(6), instant(4))
+
+
+def test_a_unit_mismatch_is_refused(tmp_path):
+    pytest.importorskip("rioxarray")
+    xarray = pytest.importorskip("xarray")
+    source = synthetic_netcdf(tmp_path / "units.nc", hours=(6,), origin_hour=4)
+    dataset = xarray.open_dataset(source)
+    dataset["PM10Concentration"].attrs["units"] = "mg/m3"
+    rewritten = tmp_path / "bad_units.nc"
+    dataset.to_netcdf(rewritten)
+    dataset.close()
+    with pytest.raises(PipelineError, match="silent relabel"):
+        air_quality.write_cog(rewritten, tmp_path / "out.tif", instant(6), instant(4))
+
+
+# --- green view --------------------------------------------------------------
+
+
+def test_a_drifted_supplement_hash_is_refused(tmp_path, monkeypatch):
+    archive = tmp_path / "mmc2.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("greenery_points.gpkg", b"not the published bytes")
+
+    def fake_download(url, target, max_bytes=None):
+        target.write_bytes(archive.read_bytes())
+
+    monkeypatch.setattr(green_view.download, "stream_download", fake_download)
+    with pytest.raises(PipelineError, match="published bytes changed"):
+        green_view.verified_supplement(
+            "https://example.invalid/mmc2.zip", "0" * 64, tmp_path, "mmc2.zip"
+        )
+
+
+def test_an_unexpected_archive_member_is_refused(tmp_path):
+    archive = tmp_path / "mmc2.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("something_else.gpkg", b"x")
+    with pytest.raises(PipelineError, match="packaging changed"):
+        green_view.extracted_member(archive, "greenery_points.gpkg", tmp_path)
+
+
+def synthetic_green_view(tmp_path):
+    """Fixtures with EVERY documented published column, so the
+    verbatim-survival assertions bite for real."""
+    geopandas = pytest.importorskip("geopandas")
+    from shapely.geometry import LineString, Point
+
+    n_points = config.GREEN_VIEW_POINT_COUNT
+    points = geopandas.GeoDataFrame(
+        {
+            "panoID": [f"p{i}" for i in range(n_points)],
+            "panoDate": ["2014-07"] * n_points,
+            "longitude": [24.9] * n_points,
+            "lattitude": [60.2] * n_points,
+            "Gvi_Mean": [50.0] * n_points,
+        },
+        geometry=[Point(24.9, 60.2)] * n_points,
+        crs="EPSG:4326",
+    )
+    n_roads = config.GREEN_VIEW_ROAD_COUNT
+    roads = geopandas.GeoDataFrame(
+        {
+            "TEKSTI": ["Testikatu"] * n_roads,
+            "TOIMINNALL": [4] * n_roads,
+            "TYYPPI": [3] * n_roads,
+            "LIIKENNEVI": [2] * n_roads,
+            "luokka": [1] * n_roads,
+            "Pyoravayla": [0] * n_roads,
+            "GSV_GVI": [40.0] * n_roads,
+            "BufAarea": [9000.0] * n_roads,
+            "LUArea": [1500.0] * n_roads,
+            "LU_GVI": [30.0] * n_roads,
+            "Comb_GVI": [40.0] * n_roads,
+            "GVI_source": ["gsv"] * n_roads,
+        },
+        geometry=[LineString([(385000, 6672000), (385100, 6672000)])] * n_roads,
+        crs="EPSG:3067",
+    )
+    points_path = tmp_path / "points.gpkg"
+    roads_path = tmp_path / "roads.gpkg"
+    points.to_file(points_path, driver="GPKG")
+    roads.to_file(roads_path, driver="GPKG")
+    return points_path, roads_path
+
+
+@pytest.mark.slow
+def test_green_view_normalizes_verbatim(tmp_path):
+    geopandas = pytest.importorskip("geopandas")
+    points_path, roads_path = synthetic_green_view(tmp_path)
+    source_points = geopandas.read_file(points_path)
+    source_roads = geopandas.read_file(roads_path)
+    out = tmp_path / "out.gpkg"
+    green_view.normalized_layers(points_path, roads_path, out)
+    points = geopandas.read_file(out, layer="points")
+    roads = geopandas.read_file(out, layer="roads")
+    assert str(points.crs).upper() == "EPSG:3067"
+    assert str(roads.crs).upper() == "EPSG:3067"
+    # Every published column survives verbatim — nothing dropped,
+    # nothing renamed — and the feature counts hold.
+    assert list(points.columns) == list(source_points.columns)
+    assert list(roads.columns) == list(source_roads.columns)
+    assert len(points) == len(source_points)
+    assert len(roads) == len(source_roads)
+    assert list(roads["Comb_GVI"]) == list(source_roads["Comb_GVI"])
+
+
+def test_out_of_range_gvi_is_refused(tmp_path):
+    geopandas = pytest.importorskip("geopandas")
+    points_path, roads_path = synthetic_green_view(tmp_path)
+    roads = geopandas.read_file(roads_path)
+    roads.loc[0, "LU_GVI"] = 140.0
+    bad = tmp_path / "bad_roads.gpkg"
+    roads.to_file(bad, driver="GPKG")
+    with pytest.raises(PipelineError, match="LU_GVI outside"):
+        green_view.normalized_layers(points_path, bad, tmp_path / "out2.gpkg")
+
+
+def test_a_partial_layer_is_refused(tmp_path):
+    geopandas = pytest.importorskip("geopandas")
+    from shapely.geometry import Point
+
+    points = geopandas.GeoDataFrame(
+        {"panoID": ["p1"], "Gvi_Mean": [50.0]},
+        geometry=[Point(24.9, 60.2)],
+        crs="EPSG:4326",
+    )
+    short = tmp_path / "short.gpkg"
+    points.to_file(short, driver="GPKG")
+    with pytest.raises(PipelineError, match="partial or substituted"):
+        green_view.normalized_layers(short, short, tmp_path / "out.gpkg")
+
+
+# --- noise -------------------------------------------------------------------
+
+
+def test_uncaptured_pins_refuse_with_instructions(monkeypatch):
+    monkeypatch.setattr(config, "NOISE_RESOURCES", {})
+    with pytest.raises(PipelineError, match="--discover"):
+        noise.pinned_resources()
+
+
+def test_incomplete_pins_are_refused(monkeypatch):
+    monkeypatch.setattr(
+        config,
+        "NOISE_RESOURCES",
+        (("road", "Lden", "id", "https://example.invalid/x", "0" * 64),),
+    )
+    with pytest.raises(PipelineError, match="missing or duplicate"):
+        noise.pinned_resources()
+
+
+def test_duplicate_pins_are_refused(monkeypatch):
+    entry = ("road", "Lden", "id", "https://example.invalid/x", "0" * 64)
+    monkeypatch.setattr(config, "NOISE_RESOURCES", (entry, entry))
+    with pytest.raises(PipelineError, match="twice"):
+        noise.pinned_resources()
+
+
+def test_class_bounds_parse_ranges_and_open_tops():
+    geopandas = pytest.importorskip("geopandas")
+    from shapely.geometry import Polygon
+
+    square = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    zones = geopandas.GeoDataFrame(
+        {"db_lo": ["55-59", "60-64", ">= 70"]},
+        geometry=[square] * 3,
+        crs="EPSG:3879",
+    )
+    low, high = noise._class_bounds(zones, "road", "Lden")
+    assert list(low) == [55.0, 60.0, 70.0]
+    assert list(high[:2]) == [59.0, 64.0]
+    assert high.isna().iloc[2]
+
+
+def test_unparsed_classes_are_refused():
+    geopandas = pytest.importorskip("geopandas")
+    from shapely.geometry import Polygon
+
+    square = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    zones = geopandas.GeoDataFrame(
+        {"db_lo": ["loud"]}, geometry=[square], crs="EPSG:3879"
+    )
+    with pytest.raises(PipelineError, match="unparsed class values"):
+        noise._class_bounds(zones, "road", "Lden")
+
+
+def test_bounds_validation_rejects_a_misplaced_open_class():
+    geopandas = pytest.importorskip("geopandas")
+    pandas = pytest.importorskip("pandas")
+    from shapely.geometry import Polygon
+
+    square = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    merged = geopandas.GeoDataFrame(
+        {
+            "source": ["road", "road"],
+            "metric": ["Lden", "Lden"],
+            "db_low": [55.0, 70.0],
+            "db_high": [pandas.NA, 74.0],
+        },
+        geometry=[square] * 2,
+        crs="EPSG:3067",
+    )
+    merged["db_high"] = merged["db_high"].astype("Float64")
+    with pytest.raises(PipelineError, match="outside the top"):
+        noise._validate_bounds(merged)
+
+
+def test_a_redirected_or_malformed_reference_is_refused():
+    origin = instant(4)
+    good = reference(4).replace("&amp;", "&")
+    air_quality.validate_reference(good, origin, instant(6))
+    evil_host = good.replace("opendata.fmi.fi", "evil.example.com")
+    with pytest.raises(PipelineError, match="redirected"):
+        air_quality.validate_reference(evil_host, origin, instant(6))
+    with pytest.raises(PipelineError, match="not HTTPS"):
+        air_quality.validate_reference(
+            good.replace("https://", "http://"), origin, instant(6)
+        )
+    with pytest.raises(PipelineError, match="expected exactly"):
+        air_quality.validate_reference(
+            good + "&origintime=2026-08-18T05:00:00Z", origin, instant(6)
+        )
+    with pytest.raises(PipelineError, match="userinfo or a fragment"):
+        air_quality.validate_reference(good + "#x", origin, instant(6))
+
+
+def test_a_wrong_or_missing_netcdf_origin_is_refused(tmp_path):
+    pytest.importorskip("rioxarray")
+    xarray = pytest.importorskip("xarray")
+    source = synthetic_netcdf(tmp_path / "plain.nc", hours=(6,))
+    with pytest.raises(PipelineError, match="declares no model origin"):
+        air_quality.write_cog(source, tmp_path / "out.tif", instant(6), instant(4))
+    dataset = xarray.open_dataset(source)
+    dataset.attrs["origintime"] = "2026-08-18T02:00:00Z"
+    wrong = tmp_path / "wrong_origin.nc"
+    dataset.to_netcdf(wrong)
+    dataset.close()
+    with pytest.raises(PipelineError, match="wrong model run"):
+        air_quality.write_cog(wrong, tmp_path / "out.tif", instant(6), instant(4))
+
+
+def test_a_declared_matching_origin_passes(tmp_path):
+    pytest.importorskip("rioxarray")
+    rasterio = pytest.importorskip("rasterio")
+    xarray = pytest.importorskip("xarray")
+    source = synthetic_netcdf(tmp_path / "ok.nc", hours=(6,))
+    dataset = xarray.open_dataset(source)
+    dataset.attrs["origintime"] = "2026-08-18T04:00:00Z"
+    bound = tmp_path / "bound.nc"
+    dataset.to_netcdf(bound)
+    dataset.close()
+    out = tmp_path / "out.tif"
+    air_quality.write_cog(bound, out, instant(6), instant(4))
+    with rasterio.open(out) as raster:
+        assert raster.count == len(config.AIR_QUALITY_BANDS)
+
+
+def test_the_reconstructed_getfeature_fixture_parses_end_to_end():
+    import pathlib
+
+    fixture = (
+        pathlib.Path(__file__).parent / "data" / "enfuser_getfeature_reconstructed.xml"
+    )
+    pairs = air_quality.member_references(fixture.read_text(encoding="utf-8"))
+    assert [origin.hour for origin, _ in pairs] == [4, 6]
+    origin, ref = air_quality.select_reference(pairs, instant(6))
+    assert origin == instant(6)
+    air_quality.validate_reference(ref, origin, instant(6))
+
+
+def test_a_coordinate_declared_origin_binds(tmp_path):
+    pytest.importorskip("rioxarray")
+    numpy = pytest.importorskip("numpy")
+    rasterio = pytest.importorskip("rasterio")
+    xarray = pytest.importorskip("xarray")
+    source = synthetic_netcdf(tmp_path / "coord.nc", hours=(6,))
+    dataset = xarray.open_dataset(source)
+    dataset = dataset.assign_coords(
+        forecast_reference_time=numpy.datetime64("2026-08-18T04:00:00")
+    )
+    bound = tmp_path / "bound_coord.nc"
+    dataset.to_netcdf(bound)
+    dataset.close()
+    out = tmp_path / "out.tif"
+    air_quality.write_cog(bound, out, instant(6), instant(4))
+    with rasterio.open(out) as raster:
+        assert raster.count == len(config.AIR_QUALITY_BANDS)
+    with pytest.raises(PipelineError, match="wrong model run"):
+        air_quality.write_cog(bound, tmp_path / "o2.tif", instant(6), instant(2))

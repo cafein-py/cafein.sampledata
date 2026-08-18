@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Reconstructed from the live GetFeature response scouted on
+     2026-08-18 (opendata.fmi.fi could not be fetched raw from the
+     implementation workstation): the member skeleton, namespaces,
+     DataRecord fields, and fileReference form follow the observed
+     response verbatim; the release workflow's live run exercises the
+     real service. -->
+<wfs:FeatureCollection xmlns:wfs="http://www.opengis.net/wfs/2.0"
+    xmlns:gml="http://www.opengis.net/gml/3.2"
+    xmlns:om="http://www.opengis.net/om/2.0"
+    xmlns:omso="http://inspire.ec.europa.eu/schemas/omso/3.0"
+    xmlns:swe="http://www.opengis.net/swe/2.0"
+    numberMatched="2" numberReturned="2">
+  <wfs:member>
+    <omso:GridSeriesObservation gml:id="WFS-grid-1">
+      <om:result>
+        <gml:rectifiedGridCoverage>
+          <gml:rangeSet>
+            <gml:File>
+              <gml:fileReference>https://opendata.fmi.fi/download?producer=enfuser_helsinki_metropolitan&amp;param=AQIndex,NO2Concentration,O3Concentration,PM10Concentration,PM25Concentration,LungDepositedSurfaceArea,BlackCarbonConcentration,ParticleNumberConcentration&amp;bbox=24.58,60.1321,25.1998,60.368&amp;levels=0&amp;origintime=2026-08-18T04:00:00Z&amp;starttime=2026-08-18T06:00:00Z&amp;endtime=2026-08-18T06:00:00Z&amp;format=netcdf&amp;projection=EPSG:4326</gml:fileReference>
+            </gml:File>
+          </gml:rangeSet>
+        </gml:rectifiedGridCoverage>
+      </om:result>
+      <om:observedProperty>
+        <swe:DataRecord>
+          <swe:field name="AQIndex"/>
+          <swe:field name="NO2Concentration"/>
+          <swe:field name="O3Concentration"/>
+          <swe:field name="PM10Concentration"/>
+          <swe:field name="PM25Concentration"/>
+          <swe:field name="LungDepositedSurfaceArea"/>
+          <swe:field name="BlackCarbonConcentration"/>
+          <swe:field name="ParticleNumberConcentration"/>
+        </swe:DataRecord>
+      </om:observedProperty>
+    </omso:GridSeriesObservation>
+  </wfs:member>
+  <wfs:member>
+    <omso:GridSeriesObservation gml:id="WFS-grid-2">
+      <om:result>
+        <gml:rectifiedGridCoverage>
+          <gml:rangeSet>
+            <gml:File>
+              <gml:fileReference>https://opendata.fmi.fi/download?producer=enfuser_helsinki_metropolitan&amp;param=AQIndex,NO2Concentration,O3Concentration,PM10Concentration,PM25Concentration,LungDepositedSurfaceArea,BlackCarbonConcentration,ParticleNumberConcentration&amp;bbox=24.58,60.1321,25.1998,60.368&amp;levels=0&amp;origintime=2026-08-18T06:00:00Z&amp;starttime=2026-08-18T06:00:00Z&amp;endtime=2026-08-18T06:00:00Z&amp;format=netcdf&amp;projection=EPSG:4326</gml:fileReference>
+            </gml:File>
+          </gml:rangeSet>
+        </gml:rectifiedGridCoverage>
+      </om:result>
+    </omso:GridSeriesObservation>
+  </wfs:member>
+</wfs:FeatureCollection>

@@ -12,6 +12,9 @@ on:
       reference_date:
         description: "Service date for validation/smoke, YYYY-MM-DD"
         required: true
+      airquality_hour:
+        description: "ENFUSER valid hour, ISO instant e.g. 2026-08-18T06:00:00Z"
+        required: true
 
 permissions:
   contents: write
@@ -22,6 +25,7 @@ env:
   RELEASE_TAG: ${{ inputs.release_tag }}
   SNAPSHOT_DATE: ${{ inputs.snapshot_date }}
   REFERENCE_DATE: ${{ inputs.reference_date }}
+  AIRQUALITY_HOUR: ${{ inputs.airquality_hour }}
 
 jobs:
   produce:
@@ -36,6 +40,8 @@ jobs:
             || { echo "malformed snapshot_date"; exit 1; }
           [[ "$REFERENCE_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] \
             || { echo "malformed reference_date"; exit 1; }
+          [[ "$AIRQUALITY_HOUR" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:00:00Z$ ]] \
+            || { echo "malformed airquality_hour"; exit 1; }
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -67,6 +73,15 @@ jobs:
       - name: Population step
         shell: bash -el {0}
         run: python -m pipeline.population work
+      - name: Air-quality step
+        shell: bash -el {0}
+        run: python -m pipeline.air_quality work "$AIRQUALITY_HOUR"
+      - name: Green view step
+        shell: bash -el {0}
+        run: python -m pipeline.green_view work
+      - name: Noise step
+        shell: bash -el {0}
+        run: python -m pipeline.noise work
       - name: Smoke build (cafein consumes every asset)
         shell: bash -el {0}
         run: python -m pipeline.smoke work "$REFERENCE_DATE"

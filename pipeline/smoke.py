@@ -28,7 +28,91 @@ STEP_MANIFESTS = {
     "manifest-dem.json": (config.DEM_ASSET,),
     "manifest-population.json": (config.POPULATION_ASSET,),
     "manifest-pois.json": tuple(config.POI_ASSETS.values()),
+    "manifest-air-quality.json": (config.AIR_QUALITY_ASSET,),
+    "manifest-green-view.json": (config.GREEN_VIEW_ASSET,),
+    "manifest-noise.json": (config.NOISE_ASSET,),
 }
+
+
+def check_exposure_assets(assets) -> None:
+    """Open and sanity-check the exposure layers: CRS, extent overlap
+    with the capital region, band names/units, and value ranges."""
+    import geopandas
+    import rasterio
+
+    west, south, east, north = config.CAPITAL_REGION_BBOX
+
+    def require_overlap(bounds, name, extent) -> None:
+        left, bottom, right, top = bounds
+        w, s, e, n = extent
+        if right < w or left > e or top < s or bottom > n:
+            raise PipelineError(f"{name} does not intersect the capital region")
+
+    with rasterio.open(assets[config.AIR_QUALITY_ASSET]) as raster:
+        if raster.crs.to_epsg() != 4326:
+            raise PipelineError("the air-quality raster is not EPSG:4326")
+        if raster.count != len(config.AIR_QUALITY_BANDS):
+            raise PipelineError(
+                f"the air-quality raster carries {raster.count} bands, "
+                f"expected {len(config.AIR_QUALITY_BANDS)}"
+            )
+        expected = [f"{name} [{unit}]" for name, unit in config.AIR_QUALITY_BANDS]
+        if list(raster.descriptions) != expected:
+            raise PipelineError(
+                f"air-quality band descriptions {raster.descriptions!r} != "
+                f"{expected!r}"
+            )
+        require_overlap(
+            tuple(raster.bounds), "the air-quality raster", (west, south, east, north)
+        )
+        sample = raster.read(4, window=((0, min(200, raster.height)), (0, min(200, raster.width))))
+        if (sample[sample == sample] < 0).any():
+            raise PipelineError("negative PM10 concentrations in the sample")
+
+    east_min, north_min, east_max, north_max = config.CAPITAL_REGION_BBOX_3067
+    green = geopandas.read_file(assets[config.GREEN_VIEW_ASSET], layer="roads")
+    if str(green.crs).upper() != "EPSG:3067":
+        raise PipelineError("the green view roads layer is not EPSG:3067")
+    require_overlap(
+        tuple(green.total_bounds),
+        "the green view roads layer",
+        (east_min, north_min, east_max, north_max),
+    )
+    for column in ("GSV_GVI", "LU_GVI", "Comb_GVI"):
+        values = green[column].dropna()
+        if (column == "Comb_GVI" and values.empty) or (
+            (values < 0) | (values > 100)
+        ).any():
+            raise PipelineError(f"{column} empty or outside [0, 100]")
+    points = geopandas.read_file(assets[config.GREEN_VIEW_ASSET], layer="points")
+    if str(points.crs).upper() != "EPSG:3067":
+        raise PipelineError("the green view points layer is not EPSG:3067")
+    require_overlap(
+        tuple(points.total_bounds),
+        "the green view points layer",
+        (east_min, north_min, east_max, north_max),
+    )
+    if len(points) != config.GREEN_VIEW_POINT_COUNT:
+        raise PipelineError("the green view points layer changed size")
+
+    zones = geopandas.read_file(assets[config.NOISE_ASSET])
+    if str(zones.crs).upper() != "EPSG:3067":
+        raise PipelineError("the noise zones are not EPSG:3067")
+    require_overlap(
+        tuple(zones.total_bounds),
+        "the noise zones",
+        (east_min, north_min, east_max, north_max),
+    )
+    bounded = zones.dropna(subset=["db_high"])
+    if (bounded["db_low"] >= bounded["db_high"]).any():
+        raise PipelineError("db_low >= db_high in a bounded noise class")
+    for (source, metric), group in zones.groupby(["source", "metric"]):
+        top = group["db_low"].max()
+        open_rows = group[group["db_high"].isna()]
+        if len(open_rows) and (open_rows["db_low"] != top).any():
+            raise PipelineError(
+                f"{source} x {metric}: null db_high outside the top class"
+            )
 
 
 def expected_assets(names=None) -> set:
@@ -309,6 +393,7 @@ def run(work_dir, date) -> dict:
 def _run_locked(work_dir, snapshot_dir, date) -> dict:
     records = verify_manifests(work_dir)
     assets = snapshot_assets(work_dir, records, snapshot_dir)
+    check_exposure_assets(assets)
     try:
         import geopandas
         from cafein import StreetNetwork, TransportNetwork, TravelTimeMatrix
