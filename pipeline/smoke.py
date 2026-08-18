@@ -82,6 +82,9 @@ def check_exposure_assets(assets) -> None:
     )
     for column in ("GSV_GVI", "LU_GVI", "Comb_GVI"):
         values = green[column].dropna()
+        if column == "GSV_GVI":
+            # -1.0 is the published no-coverage sentinel.
+            values = values[values != -1.0]
         if (column == "Comb_GVI" and values.empty) or (
             (values < 0) | (values > 100)
         ).any():

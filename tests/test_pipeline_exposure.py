@@ -341,6 +341,39 @@ def test_out_of_range_gvi_is_refused(tmp_path):
     roads.to_file(bad, driver="GPKG")
     with pytest.raises(PipelineError, match="LU_GVI outside"):
         green_view.normalized_layers(points_path, bad, tmp_path / "out2.gpkg")
+    roads = geopandas.read_file(roads_path)
+    roads.loc[0, "GSV_GVI"] = -5.0
+    bad = tmp_path / "bad_gsv.gpkg"
+    roads.to_file(bad, driver="GPKG")
+    with pytest.raises(PipelineError, match="GSV_GVI outside"):
+        green_view.normalized_layers(points_path, bad, tmp_path / "out3.gpkg")
+
+
+def test_the_gsv_no_coverage_sentinel_passes_when_consistent(tmp_path):
+    # The published roads: 18,342 segments carry GSV_GVI == -1.0 with
+    # GVI_source 'land_use' (Comb_GVI falls back to LU_GVI there).
+    geopandas = pytest.importorskip("geopandas")
+    points_path, roads_path = synthetic_green_view(tmp_path)
+    roads = geopandas.read_file(roads_path)
+    roads.loc[0, "GSV_GVI"] = -1.0
+    roads.loc[0, "GVI_source"] = "land_use"
+    mixed = tmp_path / "mixed_roads.gpkg"
+    roads.to_file(mixed, driver="GPKG")
+    out = tmp_path / "out_sentinel.gpkg"
+    green_view.normalized_layers(points_path, mixed, out)
+    roundtrip = geopandas.read_file(out, layer="roads")
+    assert (roundtrip["GSV_GVI"] == -1.0).sum() == 1
+
+
+def test_a_misaligned_gsv_sentinel_is_refused(tmp_path):
+    geopandas = pytest.importorskip("geopandas")
+    points_path, roads_path = synthetic_green_view(tmp_path)
+    roads = geopandas.read_file(roads_path)
+    roads.loc[0, "GSV_GVI"] = -1.0  # GVI_source stays 'gsv'
+    torn = tmp_path / "torn_roads.gpkg"
+    roads.to_file(torn, driver="GPKG")
+    with pytest.raises(PipelineError, match="does not line up"):
+        green_view.normalized_layers(points_path, torn, tmp_path / "out4.gpkg")
 
 
 def test_a_partial_layer_is_refused(tmp_path):
