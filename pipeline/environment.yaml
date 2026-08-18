@@ -10,6 +10,9 @@ dependencies:
   - geopandas
   - rasterio
   - rioxarray
+  # The C NetCDF reader for the ENFUSER files; without it xarray falls
+  # back to scipy's fragile pure-Python parser.
+  - netcdf4
   - pytest
   - pip
   # Builds the pinned transitio (a Rust core) from its repository:

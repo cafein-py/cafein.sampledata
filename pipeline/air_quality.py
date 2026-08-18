@@ -142,7 +142,17 @@ def write_cog(netcdf_path, out, valid_hour: datetime, origin: datetime):
             "the air-quality step needs rioxarray (see " "pipeline/environment.yaml)"
         ) from error
 
-    dataset = xarray.open_dataset(netcdf_path)
+    try:
+        dataset = xarray.open_dataset(netcdf_path)
+    except Exception as error:
+        # The download service generates the NetCDF on demand; a
+        # server-side fault delivers a complete-looking response whose
+        # payload does not parse. Surface that as what it is.
+        raise PipelineError(
+            f"the ENFUSER NetCDF failed to parse ({error}) — a truncated "
+            "or corrupt artifact from the download service; re-run the "
+            "step"
+        ) from error
     try:
         if "time" not in dataset.coords:
             raise PipelineError("the ENFUSER NetCDF carries no time coordinate")
