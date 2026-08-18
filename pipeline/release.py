@@ -43,6 +43,19 @@ MODIFICATIONS = {
         "a building, aggregated into one cell in the Gulf of Finland) "
         "dropped, and written to GeoPackage"
     ),
+    config.AIR_QUALITY_ASSET: (
+        "one valid hour sliced from the ENFUSER NetCDF and rewritten as "
+        "a cloud-optimized GeoTIFF, values and units unchanged"
+    ),
+    config.GREEN_VIEW_ASSET: (
+        "the publisher's two supplement layers repackaged into one "
+        "GeoPackage, columns verbatim"
+    ),
+    config.NOISE_ASSET: (
+        "eight source x metric WFS layers merged into one layer with "
+        "normalized source/metric/db_low/db_high columns, zone geometry "
+        "unchanged"
+    ),
 }
 
 # The POI layers are a derived database under the ODbL: selected from

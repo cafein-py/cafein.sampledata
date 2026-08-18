@@ -139,8 +139,7 @@ def write_cog(netcdf_path, out, valid_hour: datetime, origin: datetime):
         from rasterio.crs import CRS
     except ImportError as error:
         raise PipelineError(
-            "the air-quality step needs rioxarray (see "
-            "pipeline/environment.yaml)"
+            "the air-quality step needs rioxarray (see " "pipeline/environment.yaml)"
         ) from error
 
     dataset = xarray.open_dataset(netcdf_path)
@@ -159,7 +158,7 @@ def write_cog(netcdf_path, out, valid_hour: datetime, origin: datetime):
                 f"not the requested {valid_hour.isoformat()} — refusing to "
                 "publish the wrong hour"
             )
-        _require_origin(dataset, origin)
+        origin_declared = _verify_origin(dataset, origin)
         hour = dataset.sel(time=numpy.datetime64(valid_hour.replace(tzinfo=None)))
         bands = []
         for name, unit in config.AIR_QUALITY_BANDS:
@@ -237,50 +236,52 @@ def write_cog(netcdf_path, out, valid_hour: datetime, origin: datetime):
         )
     finally:
         dataset.close()
-    return pathlib.Path(out)
+    binding = (
+        "declared in the file"
+        if origin_declared
+        else "bound by the validated download reference"
+    )
+    return pathlib.Path(out), binding
 
 
-def _require_origin(dataset, origin) -> None:
-    """The downloaded bytes must declare the selected model origin —
-    a forecast_reference_time coordinate or a recognised global
-    attribute; a file without one, or with another origin, is refused."""
+def _verify_origin(dataset, origin) -> bool:
+    """EVERY model origin the file declares (a forecast_reference_time
+    coordinate, any recognised global attribute) must match the
+    selected member. The live service ships files with no declaration
+    at all; those stay bound by the validated, redirect-refused
+    download reference alone. Returns whether the file declared any."""
     from datetime import datetime, timezone
 
-    found = None
+    declared = []
     if "forecast_reference_time" in dataset.coords:
         import numpy
 
         value = numpy.asarray(dataset["forecast_reference_time"].values)
         if value.size != 1:
             raise PipelineError(
-                f"forecast_reference_time carries {value.size} values, "
-                "expected one"
+                f"forecast_reference_time carries {value.size} values, " "expected one"
             )
-        found = datetime.fromtimestamp(
-            value.reshape(())
-            .astype("datetime64[s]")
-            .astype(int),
-            tz=timezone.utc,
+        declared.append(
+            (
+                "forecast_reference_time coordinate",
+                datetime.fromtimestamp(
+                    value.reshape(()).astype("datetime64[s]").astype(int),
+                    tz=timezone.utc,
+                ),
+            )
         )
-    if found is None:
-        for name in ("origintime", "analysis_time", "forecast_reference_time"):
-            raw = dataset.attrs.get(name)
-            if raw:
-                found = parse_instant(str(raw))
-                break
-    if found is None:
-        raise PipelineError(
-            "the ENFUSER NetCDF declares no model origin "
-            "(no forecast_reference_time coordinate, none of the "
-            f"recognised attributes; attrs: {sorted(dataset.attrs)}) — "
-            "cannot bind the bytes to the selected origin"
-        )
-    if found != origin:
-        raise PipelineError(
-            f"the ENFUSER NetCDF declares origin {found.isoformat()}, the "
-            f"selected member was {origin.isoformat()} — refusing the "
-            "wrong model run"
-        )
+    for name in ("origintime", "analysis_time", "forecast_reference_time"):
+        if name in dataset.attrs:
+            raw = dataset.attrs[name]
+            declared.append((f"{name} attribute", parse_instant(str(raw))))
+    for label, found in declared:
+        if found != origin:
+            raise PipelineError(
+                f"the ENFUSER NetCDF's {label} declares origin "
+                f"{found.isoformat()}, the selected member was "
+                f"{origin.isoformat()} — refusing the wrong model run"
+            )
+    return bool(declared)
 
 
 def build(work_dir, valid_hour) -> dict:
@@ -308,7 +309,7 @@ def build(work_dir, valid_hour) -> dict:
                 refuse_redirects=True,
             )
             out = download.staging_path(run_dir, config.AIR_QUALITY_ASSET)
-            write_cog(netcdf_path, out, hour, origin)
+            out, binding = write_cog(netcdf_path, out, hour, origin)
             import rasterio
 
             with rasterio.open(out) as raster:
@@ -320,8 +321,8 @@ def build(work_dir, valid_hour) -> dict:
                 )
             stamp = (
                 f"FMI-ENFUSER valid hour {hour.isoformat()}, model origin "
-                f"{origin.isoformat()}, fetched {_utcnow()} from "
-                f"{reference}, native grid {grid}, values and units "
+                f"{origin.isoformat()} ({binding}), fetched {_utcnow()} "
+                f"from {reference}, native grid {grid}, values and units "
                 "unchanged"
             )
             record = manifest.asset_record(
