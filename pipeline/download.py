@@ -27,6 +27,7 @@ def stream_download(
     timeout=config.DOWNLOAD_TIMEOUT,
     max_bytes=config.MAX_DOWNLOAD_BYTES,
     headers=None,
+    refuse_redirects=False,
 ) -> dict:
     """Download `url` to `destination`, returning what was fetched:
     sha256, byte size, fetch time, and the server's Last-Modified.
@@ -51,7 +52,7 @@ def stream_download(
                 # which could hand the credential to another origin.
                 opener = (
                     urllib.request.build_opener(_RefuseRedirects())
-                    if headers
+                    if headers or refuse_redirects
                     else urllib.request.build_opener()
                 )
                 with opener.open(request, timeout=timeout) as response:

@@ -35,6 +35,9 @@ ATTRIBUTES = {
     "gtfs": "hsl_gtfs.zip",
     "dem": "helsinki_dem_10m.tif",
     "population_grid": "hsy_population_grid_250m.gpkg",
+    "air_quality": "helsinki_air_quality.tif",
+    "green_view": "helsinki_green_view.gpkg",
+    "noise": "helsinki_noise_2022.gpkg",
 }
 ATTRIBUTES.update(
     {f"poi_{category}": asset for category, asset in config.POI_ASSETS.items()}

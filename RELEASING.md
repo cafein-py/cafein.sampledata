@@ -13,9 +13,17 @@ for the calendar.
 
 1. Run the **data-release** workflow (Actions → data-release → Run
    workflow) with the release tag (`helsinki-YYYY.MM[.N]`), a Geofabrik
-   snapshot date (`YYMMDD`, an immutable dated source), and a service
+   snapshot date (`YYMMDD`, an immutable dated source), a service
    date inside the fresh feed (`YYYY-MM-DD`, usually a near-future
-   weekday). Requires the `MML_API_KEY` repository secret.
+   weekday), and the ENFUSER valid hour (an ISO instant like
+   `2026-08-18T06:00:00Z`; recent hours only — the open WFS serves
+   near-real-time and forecast, not an archive). Requires the
+   `MML_API_KEY` repository secret. The noise step additionally
+   requires the one-time resource pins in `pipeline/config.py`
+   (`NOISE_RESOURCES`) — capture them once with
+   `python -m pipeline.noise --discover <work_dir>` from a machine
+   that reaches hri.fi, and refresh them only when HRI republishes
+   the dataset.
 2. The workflow fetches the sources, validates the feed with transitio,
    smoke-tests every asset through cafein, and attaches the assets plus
    `manifest.json`, the validation report, `LICENSES.txt`, and release

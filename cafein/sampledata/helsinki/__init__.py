@@ -16,6 +16,16 @@ first access (see the package README for the cache):
 - ``emission_factors_full`` — the full three-table reference (transit,
   street, and per-powertrain rows, a ``table`` column apart), for
   authoring custom factor tables
+- ``air_quality`` — one pinned hour of FMI-ENFUSER air quality
+  (eight bands with units in the band descriptions), native ~13 m
+  EPSG:4326 grid — one model hour, not a climatology
+- ``green_view`` — the published Green View Index dataset (street
+  level visible greenery from GSV panoramas; layers ``points`` and
+  ``roads``, the roads' ``Comb_GVI`` being the per-segment exposure
+  value), columns verbatim, EPSG:3067
+- ``noise`` — Helsinki's meluselvitys 2022 zone polygons
+  (road/rail/metro/tram × Lden/Ln; ``db_high`` null on the
+  open-ended top class), EPSG:3067, Helsinki city extent
 - ``metadata`` — per-asset provenance: source, license, attribution,
   sha256, size, release identifier
 """
@@ -67,12 +77,15 @@ def _factors_metadata(path) -> dict:
 
 __all__ = [
     "REGION",
+    "air_quality",
     "dem",
     "emission_factors",
     "emission_factors_full",
     "fetch",
+    "green_view",
     "gtfs",
     "metadata",
+    "noise",
     "osm_pbf",
     "pois",
     "population_grid",
