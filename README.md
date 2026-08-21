@@ -15,6 +15,7 @@ helsinki.air_quality      # FMI-ENFUSER air quality, one pinned hour
 helsinki.green_view       # Green View Index (street-level greenery)
 helsinki.noise            # Helsinki noise survey 2022, zone polygons
 helsinki.pois.library     # OSM destinations, one category per file
+helsinki.statistics.income # Paavo income variables by postal code area
 helsinki.emission_factors # cafein's default GHG factors as a CSV
 ```
 
@@ -24,7 +25,13 @@ Destination categories under `pois` — `library`, `kindergarten`,
 EPSG:4326) extracted from the same OpenStreetMap release as
 `osm_pbf`.
 
-Each data attribute — including each category under `pois` — is a
+Statistics layers under `statistics` — currently `income`, Statistics
+Finland's Paavo disposable-income variables (median and average income,
+income-category counts, for inhabitants and households) by postal-code
+area, polygons in EPSG:3067 (layer `income`). Values Paavo protects for
+privacy are nulls.
+
+Each data attribute — including each category under `pois` and each layer under `statistics` — is a
 `pathlib.Path`; the file downloads and verifies on first use. A package release pins exact data snapshots — upgrade the
 package to get newer data.
 
@@ -91,7 +98,7 @@ is not comparable with 2017's:
 The package code is MIT. The datasets carry their own open licenses —
 OpenStreetMap (ODbL 1.0, the extract and the POI layers derived from
 it), HSL GTFS (CC BY 4.0), National Land Survey of Finland elevation
-model (CC BY 4.0), HSY population grid (CC BY 4.0), FMI-ENFUSER air
+model (CC BY 4.0), HSY population grid (CC BY 4.0), Statistics Finland Paavo (CC BY 4.0), FMI-ENFUSER air
 quality (CC BY 4.0), the Green View Index dataset (CC BY 4.0, Toikka
 et al. 2020), and the Helsinki noise survey (CC BY 4.0) — with
 attribution recorded per asset in `<region>.metadata`.

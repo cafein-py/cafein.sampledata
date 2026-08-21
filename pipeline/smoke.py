@@ -31,6 +31,7 @@ STEP_MANIFESTS = {
     "manifest-air-quality.json": (config.AIR_QUALITY_ASSET,),
     "manifest-green-view.json": (config.GREEN_VIEW_ASSET,),
     "manifest-noise.json": (config.NOISE_ASSET,),
+    "manifest-paavo.json": (config.STATISTICS_INCOME_ASSET,),
 }
 
 
@@ -381,6 +382,67 @@ def check_pois(assets, records, streets) -> None:
             )
 
 
+def check_statistics(assets, streets) -> None:
+    """The income layer reads as valid postal-code areas whose values
+    are usable, and its areas land on the shipped street network."""
+    import geopandas
+
+    areas = geopandas.read_file(assets[config.STATISTICS_INCOME_ASSET], layer="income")
+    if areas.crs is None or areas.crs.to_epsg() != 3067:
+        raise PipelineError(f"the income layer is in {areas.crs}, not EPSG:3067")
+    if list(areas.columns) != list(config.STATISTICS_INCOME_COLUMNS) + ["geometry"]:
+        raise PipelineError(
+            f"the income layer's columns changed: {list(areas.columns)}"
+        )
+    if len(areas) < config.MIN_STATISTICS_AREAS:
+        raise PipelineError(
+            f"the income layer carries {len(areas)} areas, expected at "
+            f"least {config.MIN_STATISTICS_AREAS}"
+        )
+    import numpy
+
+    for column in config.STATISTICS_INCOME_VALUES:
+        values = areas[column].dropna()
+        # The privacy sentinel must be nulled, never shipped, and every
+        # shipped value must be finite: a -1 or an inf in a mean
+        # silently poisons it.
+        if (values < 0).any() or not numpy.isfinite(values).all():
+            raise PipelineError(
+                f"the income layer ships negative or non-finite " f"{column!r} values"
+            )
+    # .str.fullmatch yields NA for a null or non-string cell, and
+    # Series.all() would skip it — fill to False so a hole fails.
+    if not (
+        areas["postinumeroalue"].str.fullmatch(r"[0-9]{5}").fillna(False).all()
+        and areas["kunta"].str.fullmatch(r"[0-9]{3}").fillna(False).all()
+        and areas["nimi"].map(lambda n: isinstance(n, str) and n.strip() != "").all()
+    ):
+        raise PipelineError(
+            "the income layer's identity columns lost their string form"
+        )
+    if not (areas["hr_mtu"].dropna() > 0).any():
+        raise PipelineError("the income layer counts no income anywhere")
+    for column in config.STATISTICS_INCOME_VALUES:
+        if areas[column].dropna().empty:
+            raise PipelineError(
+                f"the income layer's {column!r} carries no values at all"
+            )
+    # Two central areas must be usable as origins on the street network
+    # this same release ships.
+    central = central_features(areas, 2)
+    start, end = (
+        geopandas.GeoSeries(central.geometry.centroid, crs=areas.crs)
+        .to_crs("EPSG:4326")
+        .values
+    )
+    seconds = streets.travel_time((start.y, start.x), (end.y, end.x), mode="walk")
+    if seconds is None or not math.isfinite(seconds) or seconds <= 0:
+        raise PipelineError(
+            "no walking journey between the two most central postal-code "
+            "areas — the income layer does not reach the street network"
+        )
+
+
 def run(work_dir, date) -> dict:
     """The full smoke: manifest verification, cafein builds, one query
     per surface — under the work-directory lock, and consuming private
@@ -493,6 +555,9 @@ def _run_locked(work_dir, snapshot_dir, date) -> dict:
     # the same release ships — a layer of plausible coordinates off the
     # network would route nowhere.
     check_pois(assets, records, streets)
+
+    # Statistics: the Paavo income layer reads and routes.
+    check_statistics(assets, streets)
 
     # Population grid: read, then route a few cells as polygon origins.
     grid = geopandas.read_file(grid_path, layer="population_grid")

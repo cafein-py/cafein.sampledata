@@ -89,6 +89,9 @@ jobs:
       - name: Population step
         shell: bash -el {0}
         run: python -m pipeline.population work
+      - name: Paavo step
+        shell: bash -el {0}
+        run: python -m pipeline.paavo work
       - name: Smoke build (cafein consumes every asset)
         shell: bash -el {0}
         run: python -m pipeline.smoke work "$REFERENCE_DATE"
@@ -120,6 +123,7 @@ jobs:
             work/helsinki_air_quality.tif \
             work/helsinki_green_view.gpkg \
             work/helsinki_noise_2022.gpkg \
+            work/statfi_paavo_income.gpkg \
             work/manifest.json \
             work/gtfs-validation-report.json \
             work/LICENSES.txt

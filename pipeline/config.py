@@ -132,6 +132,58 @@ POPULATION_ASSET = "hsy_population_grid_250m.gpkg"
 POPULATION_LICENSE = "CC BY 4.0"
 POPULATION_ATTRIBUTION = "Helsinki Region Environmental Services HSY population grid"
 
+# --- Statistics (Statistics Finland Paavo) -----------------------------------
+
+# Paavo, the open statistics-by-postal-code-area service, published per
+# year as a WFS layer; the newest is discovered from GetCapabilities.
+PAAVO_WFS_URL = "https://geo.stat.fi/geoserver/postialue/wfs"
+PAAVO_LAYER_PREFIX = "postialue:pno_tilasto_"
+#: The layer's geometry property, named in propertyName so the server
+#: returns geometries alongside the requested columns.
+PAAVO_GEOMETRY_PROPERTY = "geom"
+
+# The income layer's columns, in output order: the area identity, then
+# the disposable-income variables for inhabitants (hr_*) and households
+# (tr_*/te_taly). Requested by name through propertyName, so a Paavo
+# schema change fails the fetch instead of shipping a different layer.
+STATISTICS_INCOME_COLUMNS = (
+    "postinumeroalue",  # postal code
+    "nimi",  # area name
+    "kunta",  # municipality code
+    "hr_tuy",  # inhabitants aged 18 or over (with income)
+    "hr_ktu",  # average annual disposable income of inhabitants
+    "hr_mtu",  # median annual disposable income of inhabitants
+    "hr_pi_tul",  # inhabitants in the lowest income category
+    "hr_ke_tul",  # inhabitants in the middle income category
+    "hr_hy_tul",  # inhabitants in the highest income category
+    "tr_kuty",  # households (with income)
+    "tr_ktu",  # average annual disposable income of households
+    "tr_mtu",  # median annual disposable income of households
+    "tr_pi_tul",  # households in the lowest income category
+    "tr_ke_tul",  # households in the middle income category
+    "tr_hy_tul",  # households in the highest income category
+    "te_taly",  # households, total
+)
+#: The statistics columns proper — everything after the identity triple.
+STATISTICS_INCOME_VALUES = STATISTICS_INCOME_COLUMNS[3:]
+
+# Paavo publishes -1 where a value is privacy-protected (too few
+# inhabitants or households to disclose); the step replaces it with
+# null so no aggregate silently absorbs a sentinel.
+PAAVO_PROTECTED_SENTINEL = -1
+
+# ~200 postal-code areas centre inside the capital-region extent (202
+# in the 2026 layer); far fewer means a truncated or wrong layer, and
+# anything past the ceiling is not a postal-code-area subset.
+MIN_STATISTICS_AREAS = 120
+MAX_PAAVO_FEATURES = 2000
+
+STATISTICS_INCOME_ASSET = "statfi_paavo_income.gpkg"
+#: The ``helsinki.statistics`` namespace: attribute name -> asset.
+STATISTICS_ASSETS = {"income": STATISTICS_INCOME_ASSET}
+STATISTICS_LICENSE = "CC BY 4.0"
+STATISTICS_ATTRIBUTION = "Statistics Finland Paavo postal code area statistics"
+
 # --- Points of interest (OSM) -----------------------------------------------
 
 # Destination categories extracted from the capital-region extract, one
