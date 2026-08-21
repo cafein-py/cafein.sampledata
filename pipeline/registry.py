@@ -42,6 +42,9 @@ ATTRIBUTES = {
 ATTRIBUTES.update(
     {f"poi_{category}": asset for category, asset in config.POI_ASSETS.items()}
 )
+ATTRIBUTES.update(
+    {f"statistics_{layer}": asset for layer, asset in config.STATISTICS_ASSETS.items()}
+)
 
 
 RELEASE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")

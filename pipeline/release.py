@@ -37,6 +37,12 @@ MODIFICATIONS = {
         "resampled to 10 m from the 2 m model, mosaicked from WCS tiles, "
         "and clipped to the capital region"
     ),
+    config.STATISTICS_INCOME_ASSET: (
+        "the disposable-income columns selected from the Paavo "
+        "statistics, privacy-protected values (published as -1) "
+        "replaced with nulls, clipped to the capital-region extent, "
+        "and written to GeoPackage"
+    ),
     config.POPULATION_ASSET: (
         "clipped to the capital-region extent, HSY's unknown-location "
         "dummy cell (institutional residents and residents not linked to "

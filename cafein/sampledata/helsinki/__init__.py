@@ -7,6 +7,9 @@ first access (see the package README for the cache):
 - ``gtfs`` — the HSL GTFS feed, transitio-validated at release time
 - ``dem`` — the NLS 10 m elevation model, EPSG:3067 COG
 - ``population_grid`` — HSY's 250 m population grid, GeoPackage
+- ``statistics`` — socioeconomic statistics: ``statistics.income``,
+  Statistics Finland's Paavo disposable-income variables by
+  postal-code area (see ``cafein.sampledata.helsinki.statistics``)
 - ``pois`` — OpenStreetMap destinations by category, a GeoPackage of
   points each: ``pois.library``, ``pois.supermarket``, … (see
   ``cafein.sampledata.helsinki.pois``)
@@ -88,6 +91,7 @@ __all__ = [
     "noise",
     "osm_pbf",
     "pois",
+    "statistics",
     "population_grid",
 ]
 
@@ -111,10 +115,10 @@ def __getattr__(name):
         return _resolve(name)
     if name in _FACTOR_FILES:
         return _FACTOR_FILES[name]
-    if name == "pois":
+    if name in ("pois", "statistics"):
         import importlib
 
-        return importlib.import_module(f"{__name__}.pois")
+        return importlib.import_module(f"{__name__}.{name}")
     if name == "metadata":
         table = {key: asset.metadata() for key, asset in _registry.ASSETS.items()}
         for key, path in _FACTOR_FILES.items():
